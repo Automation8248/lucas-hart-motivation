@@ -36,41 +36,67 @@ def get_ai_quote():
     return random.choice(fallbacks)
 
 def get_unique_img():
-    """Repetition rokne ke liye unique image fetcher"""
-    url = f"https://pixabay.com/api/?key={PIXABAY_KEY}&q=nature+landscape&orientation=vertical&per_page=100"
-    hits = requests.get(url).json().get('hits', [])
+    """Sirf 'Real Nature' images lene ke liye specific search query"""
+    # Query mein filters add kiye hain taaki artificial/animation na aaye
+    query = "nature+landscape+forest+mountain+-cgi+-animation+-vector+-artwork"
+    url = f"https://pixabay.com/api/?key={PIXABAY_KEY}&q={query}&image_type=photo&orientation=vertical&per_page=100"
     
-    history = []
-    if os.path.exists("video_history.txt"):
-        with open("video_history.txt", "r") as f: history = f.read().splitlines()
+    try:
+        response = requests.get(url).json()
+        hits = response.get('hits', [])
+        
+        history = []
+        if os.path.exists("video_history.txt"):
+            with open("video_history.txt", "r") as f: history = f.read().splitlines()
 
-    for hit in hits:
-        if str(hit['id']) not in history:
-            with open("video_history.txt", "a") as f: f.write(str(hit['id']) + "\n")
-            with open('bg.jpg', 'wb') as f: f.write(requests.get(hit['largeImageURL']).content)
-            return 'bg.jpg'
+        for hit in hits:
+            if str(hit['id']) not in history:
+                with open("video_history.txt", "a") as f: f.write(str(hit['id']) + "\n")
+                img_data = requests.get(hit['largeImageURL']).content
+                with open('bg.jpg', 'wb') as f: f.write(img_data)
+                return 'bg.jpg'
+    except Exception as e:
+        print(f"Image fetch error: {e}")
     return None
 
 def create_video(quote_text):
-    # Background Image
+    # Background Image (Real Nature Only)
     bg_path = get_unique_img()
+    if not bg_path:
+        raise Exception("Could not fetch a real nature image.")
+        
     bg = ImageClip(bg_path).set_duration(DURATION).resize(height=1920)
     
-    # Yellow Highlighted Text (No Shadow Box)
+    # Yellow Highlighted Text (No Shadow Box, High Contrast)
     full_text = f"{quote_text}\n\n- {AUTHOR}"
-    txt = TextClip(full_text, fontsize=85, color='yellow', font='Arial-Bold', method='caption', 
-                   size=(850, None), align='Center', stroke_color='black', stroke_width=3).set_duration(DURATION).set_position('center')
+    txt = TextClip(full_text, 
+                   fontsize=85, 
+                   color='yellow', 
+                   font='Arial-Bold', 
+                   method='caption', 
+                   size=(850, None), 
+                   align='Center', 
+                   stroke_color='black', 
+                   stroke_width=3).set_duration(DURATION).set_position('center')
     
-    # Music Fetch
-    m_res = requests.get(f"https://freesound.org/apiv2/search/text/?query=piano+soft&token={FREESOUND_KEY}")
-    s_id = m_res.json()['results'][0]['id']
-    m_info = requests.get(f"https://freesound.org/apiv2/sounds/{s_id}/?token={FREESOUND_KEY}").json()
-    with open('music.mp3', 'wb') as f: f.write(requests.get(m_info['previews']['preview-hq-mp3']).content)
+    # Piano Music Fetch
+    try:
+        m_res = requests.get(f"https://freesound.org/apiv2/search/text/?query=piano+soft&token={FREESOUND_KEY}")
+        s_id = m_res.json()['results'][0]['id']
+        m_info = requests.get(f"https://freesound.org/apiv2/sounds/{s_id}/?token={FREESOUND_KEY}").json()
+        with open('music.mp3', 'wb') as f: f.write(requests.get(m_info['previews']['preview-hq-mp3']).content)
+        audio = AudioFileClip('music.mp3').subclip(0, DURATION)
+    except:
+        # Simple audio fallback if API fails
+        audio = None
     
     # Final Merge
-    final = CompositeVideoClip([bg, txt]).set_audio(AudioFileClip('music.mp3').subclip(0, DURATION))
-    final.write_videofile("short.mp4", fps=24, codec="libx264", audio_codec="aac")
-    return "short.mp4"
+    video = CompositeVideoClip([bg, txt])
+    if audio:
+        video = video.set_audio(audio)
+        
+    video.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
+    return "final_short.mp4"
 
 def upload_catbox(file):
     with open(file, 'rb') as f:
@@ -81,7 +107,7 @@ try:
     print("Fetching Quote...")
     quote = get_ai_quote()
     
-    print("Creating Video...")
+    print("Creating Video with Real Nature Image...")
     video_file = create_video(quote)
     
     print("Uploading to Catbox...")
@@ -92,9 +118,8 @@ try:
         caption = f"✨ {quote[:48]}\n\n#motivation #lucashart #shorts #nature #quotes #success #inspiration #mindset"
         
         print("Sending to Telegram...")
-        tg_res = requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo", 
-                               data={"chat_id": TG_CHAT_ID, "video": catbox_url, "caption": caption})
-        tg_res.raise_for_status()
+        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo", 
+                      data={"chat_id": TG_CHAT_ID, "video": catbox_url, "caption": caption}).raise_for_status()
 
         if WEBHOOK_URL:
             requests.post(WEBHOOK_URL, json={"video_url": catbox_url, "caption": caption})
