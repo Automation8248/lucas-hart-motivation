@@ -10,7 +10,7 @@ from moviepy.editor import ImageClip, TextClip, AudioFileClip, CompositeVideoCli
 # ================== ENV KEYS ==================
 PIXABAY_KEY = os.getenv('PIXABAY_API_KEY')
 FREESOUND_KEY = os.getenv('FREESOUND_API_KEY')
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')  # Gemini
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')  # Use Gemini key here
 TG_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TG_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
@@ -21,7 +21,7 @@ DURATION = 5
 # ================== AI DATA (Gemini) ==================
 def get_ai_data():
     """
-    Fetches a fresh motivational quote and title from Gemini via OpenRouter.
+    Fetches a fresh motivational quote and title from Gemini Generative Language API.
     Returns (title, quote)
     """
     prompt = (
@@ -32,16 +32,20 @@ def get_ai_data():
 
     try:
         res = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+            "https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generateMessage",
+            headers={
+                "Authorization": f"Bearer {GEMINI_API_KEY}",
+                "Content-Type": "application/json"
+            },
             json={
-                "model": "google/gemini-2.0-flash-exp:free",
-                "messages": [{"role": "user", "content": prompt}]
+                "prompt": {"text": prompt},
+                "temperature": 0.7,
+                "maxOutputTokens": 256
             },
             timeout=25
         )
 
-        raw = res.json()["choices"][0]["message"]["content"].strip()
+        raw = res.json()["candidates"][0]["content"].strip()
 
         # Remove code fences if present
         if "```" in raw:
@@ -49,6 +53,7 @@ def get_ai_data():
 
         data = json.loads(raw)
         return data.get('title', 'Daily Inspiration'), data.get('quote', 'Success starts with self-discipline.')
+
     except Exception as e:
         print("AI Error:", e)
         return "Daily Inspiration", "Success starts with self-discipline."
@@ -65,7 +70,7 @@ def get_real_nature_img():
         "orientation": "vertical",
         "per_page": 100,
         "safesearch": "true",
-        "image_type": "photo"  # Ensures only real photos
+        "image_type": "photo"
     }
 
     try:
@@ -77,7 +82,7 @@ def get_real_nature_img():
             print("No real photos found.")
             return None
 
-        history_file = "video_history.txt"
+        history_file = "image_history.txt"
         history = open(history_file).read().splitlines() if os.path.exists(history_file) else []
 
         random.shuffle(hits)
@@ -160,50 +165,56 @@ def create_video(quote):
     return "final_short.mp4"
 
 # ================== MAIN ==================
-try:
-    print("Step 1: Fetch AI motivational quote")
-    title, quote = get_ai_data()
+if __name__ == "__main__":
+    try:
+        # ---------- STEP 1: Get new motivational quote ----------
+        print("Step 1: Fetch AI motivational quote")
+        title, quote = get_ai_data()
+        print(f"Quote: {quote}")
 
-    print("Step 2: Generate video")
-    video_file = create_video(quote)
+        # ---------- STEP 2: Create video ----------
+        print("Step 2: Generate video")
+        video_file = create_video(quote)
 
-    print("Step 3: Upload to Catbox")
-    with open(video_file, "rb") as f:
-        catbox_url = requests.post(
-            "https://catbox.moe/user/api.php",
-            data={"reqtype": "fileupload"},
-            files={"fileToUpload": f}
-        ).text.strip()
+        # ---------- STEP 3: Upload to Catbox ----------
+        print("Step 3: Upload to Catbox")
+        with open(video_file, "rb") as f:
+            catbox_url = requests.post(
+                "https://catbox.moe/user/api.php",
+                data={"reqtype": "fileupload"},
+                files={"fileToUpload": f}
+            ).text.strip()
 
-    if "http" not in catbox_url:
-        raise Exception("Catbox upload failed")
+        if "http" not in catbox_url:
+            raise Exception("Catbox upload failed")
 
-    caption = (
-        f"🎬 *{title}*\n\n"
-        f"✨ {quote}\n\n"
-        f"#motivation #nature #shorts #lucashart #success #mindset"
-    )
-
-    # ---------- TELEGRAM ----------
-    requests.post(
-        f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo",
-        data={
-            "chat_id": TG_CHAT_ID,
-            "video": catbox_url,
-            "caption": caption,
-            "parse_mode": "Markdown"
-        }
-    )
-
-    # ---------- WEBHOOK ----------
-    if WEBHOOK_URL:
-        requests.post(
-            WEBHOOK_URL,
-            json={"url": catbox_url, "title": title, "caption": caption},
-            timeout=10
+        caption = (
+            f"🎬 *{title}*\n\n"
+            f"✨ {quote}\n\n"
+            f"#motivation #nature #shorts #lucashart #success #mindset"
         )
 
-    print("SUCCESS:", catbox_url)
+        # ---------- TELEGRAM ----------
+        requests.post(
+            f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo",
+            data={
+                "chat_id": TG_CHAT_ID,
+                "video": catbox_url,
+                "caption": caption,
+                "parse_mode": "Markdown"
+            }
+        )
 
-except Exception as e:
-    print("Fatal Error:", e)
+        # ---------- WEBHOOK ----------
+        if WEBHOOK_URL:
+            requests.post(
+                WEBHOOK_URL,
+                json={"url": catbox_url, "title": title, "caption": caption},
+                timeout=10
+            )
+
+        print("SUCCESS:", catbox_url)
+
+    except Exception as e:
+        print("Fatal Error:", e)
+
