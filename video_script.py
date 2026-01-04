@@ -19,73 +19,39 @@ AUTHOR = "Lucas Hart"
 DURATION = 5
 
 # ================== AI DATA ==================
-def get_ai_data(max_retries=3):
+def get_ai_data():
     url = "https://api.straico.com/v1/prompt/completion"
-
     prompt = (
-        f"Generate a UNIQUE motivational quote by {AUTHOR} (max 100 chars). "
-        f"Do NOT repeat common quotes. "
-        f"Also generate a short catchy title (max 40 chars). "
-        f"Return ONLY valid JSON like: "
-        f'{{"title":"...","quote":"..."}}'
+        f"Generate a unique motivational quote by {AUTHOR} (max 100 chars) "
+        f"and a catchy title (max 40 chars). "
+        f"Return ONLY JSON: {{\"title\":\"...\",\"quote\":\"...\"}}"
     )
 
     headers = {"Authorization": f"Bearer {STRAICO_API_KEY}"}
-    payload = {
-        "models": ["google/gemini-2.0-flash-exp"],
-        "message": prompt
-    }
+    payload = {"models": ["google/gemini-2.0-flash-exp"], "message": prompt}
 
-    history = []
-    if os.path.exists(QUOTE_HISTORY_FILE):
-        history = open(QUOTE_HISTORY_FILE).read().splitlines()
+    try:
+        res = requests.post(url, headers=headers, json=payload, timeout=25)
+        raw = res.json()['data']['completions']['google/gemini-2.0-flash-exp']['completion'].strip()
 
-    for attempt in range(max_retries):
-        try:
-            res = requests.post(url, headers=headers, json=payload, timeout=25)
-            raw = res.json()["data"]["completions"]["google/gemini-2.0-flash-exp"]["completion"]
+        if "```" in raw:
+            raw = raw.split("```")[1]
 
-            # Remove markdown if present
-            raw = raw.replace("```json", "").replace("```", "").strip()
-
-            data = json.loads(raw)
-            title = data["title"].strip()
-            quote = data["quote"].strip()
-
-            # ❌ Duplicate check
-            if quote in history:
-                print("Duplicate quote detected, retrying...")
-                continue
-
-            # ✅ Save new quote
-            with open(QUOTE_HISTORY_FILE, "a") as f:
-                f.write(quote + "\n")
-
-            return title, quote
-
-        except Exception as e:
-            print(f"Straico attempt {attempt+1} failed:", e)
-            time.sleep(2)
-
-    # ❗ LAST fallback (rare)
-    return "Daily Inspiration", "Discipline today creates freedom tomorrow."
-
+        data = json.loads(raw)
+        return data['title'], data['quote']
+    except:
+        return "Daily Inspiration", "Success starts with self-discipline."
 
 # ================== PIXABAY IMAGE ==================
 def get_unique_nature_img():
     url = "https://pixabay.com/api/"
     params = {
-    "key": PIXABAY_KEY,
-    "q": "nature mountain landscape photography",
-    "image_type": "photo",          # ❌ vector / illustration remove
-    "category": "nature",
-    "orientation": "vertical",
-    "editors_choice": "true",       # curated photos only
-    "order": "popular",
-    "per_page": 100,
-    "safesearch": "true"
-}
-
+        "key": PIXABAY_KEY,
+        "q": "nature landscape mountain",
+        "orientation": "vertical",
+        "per_page": 100,
+        "safesearch": "true"
+    }
 
     try:
         res = requests.get(url, params=params, timeout=15)
@@ -127,7 +93,7 @@ def create_video(quote):
     txt = (
         TextClip(
             text,
-            fontsize=85,
+            fontsize=65,
             color="white",
             font="Arial-Bold",
             method="caption",
