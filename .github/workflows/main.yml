@@ -1,34 +1,32 @@
-name: Motivational Video Automation
+name: Daily Motivation Video
 
 on:
   schedule:
-    - cron: '0 14 * * *' # USA Morning
-    - cron: '0 23 * * *' # USA Evening
+    - cron: '0 14 * * *'  # 9 AM EST
+    - cron: '0 23 * * *'  # 6 PM EST
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install System Dependencies
+      - name: Install Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick
-          # Policy fix for ImageMagick text rendering
+          # ImageMagick security policy fix
           sudo sed -i 's/domain="path" rights="none" pattern="@\*"/domain="path" rights="read|write" pattern="@\*"/g' /etc/ImageMagick-6/policy.xml
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Py Libraries
+      - name: Install Python Deps
         run: pip install requests moviepy
 
-      - name: Run Script
+      - name: Run Automation
         env:
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
@@ -37,3 +35,11 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: python video_script.py
+
+      - name: Save History
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add video_history.txt
+          git commit -m "Update history" || echo "No changes"
+          git push
