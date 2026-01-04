@@ -71,7 +71,7 @@ def create_video(quote_text):
     full_text = f"{quote_text}\n\n- {AUTHOR}"
     txt = TextClip(full_text, 
                    fontsize=85, 
-                   color='yellow', 
+                   color='white', 
                    font='Arial-Bold', 
                    method='caption', 
                    size=(850, None), 
