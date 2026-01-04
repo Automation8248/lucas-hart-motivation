@@ -19,7 +19,7 @@ AUTHOR = "Lucas Hart"
 DURATION = 5 
 
 def get_ai_data():
-    """Straico API integration with JSON cleaning"""
+    """Straico API integration - fetches Title and Quote"""
     url = "https://api.straico.com/v1/prompt/completion"
     prompt = (f"Generate a unique motivational quote by {AUTHOR} (max 100 chars) "
               f"and a matching short catchy title (max 40 chars). "
@@ -43,11 +43,11 @@ def get_ai_data():
 def get_unique_img():
     """FIXED: Clean Pixabay URL without markdown brackets"""
     query = "nature+landscape+forest+mountain+-cgi+-animation+-vector+-artwork"
-    # CLEAN URL FIX:
-    url = f"[https://pixabay.com/api/?key=](https://pixabay.com/api/?key=){PIXABAY_KEY}&q={query}&image_type=photo&orientation=vertical&per_page=100"
+    # CLEAN URL logic
+    pix_url = f"[https://pixabay.com/api/?key=](https://pixabay.com/api/?key=){PIXABAY_KEY}&q={query}&image_type=photo&orientation=vertical&per_page=100"
     
     try:
-        response = requests.get(url, timeout=15)
+        response = requests.get(pix_url, timeout=15)
         if response.status_code != 200: return None
         
         hits = response.json().get('hits', [])
@@ -67,20 +67,20 @@ def get_unique_img():
     return None
 
 def create_video(quote_text):
-    """Video creation with dark background and white text"""
+    """Creates video with pure white text and dark background"""
     bg_path = get_unique_img()
     if not bg_path: raise Exception("Image download fail ho gayi.")
     
-    # Image Darkening (No Outline needed)
+    # Darken image by 30% for text visibility
     bg = ImageClip(bg_path).set_duration(DURATION).resize(height=1920).fl_image(lambda image: (image * 0.7).astype('uint8'))
     
-    # Pure White text (No stroke)
+    # Pure White text (No stroke/outline)
     txt = TextClip(f"{quote_text}\n\n- {AUTHOR}", fontsize=65, color='white', font='Arial-Bold', 
                    method='caption', size=(850, None), stroke_width=0).set_duration(DURATION).set_position('center')
     
     final = CompositeVideoClip([bg, txt])
     
-    # Piano Music
+    # Soft Piano Music
     try:
         m_res = requests.get(f"[https://freesound.org/apiv2/search/text/?query=piano+soft&token=](https://freesound.org/apiv2/search/text/?query=piano+soft&token=){FREESOUND_KEY}", timeout=10).json()
         s_id = m_res['results'][0]['id']
@@ -105,13 +105,13 @@ try:
         catbox_url = requests.post("[https://catbox.moe/user/api.php](https://catbox.moe/user/api.php)", data={'reqtype': 'fileupload'}, files={'fileToUpload': f}).text.strip()
     
     if "http" in catbox_url:
-        caption = f"🎬 **{title}**\n\n✨ {quote}\n\n#motivation #nature #shorts #lucashart"
+        caption = f"🎬 **{title}**\n\n✨ {quote}\n\n#motivation #nature #shorts #inspiration #success #mindset #growth #life"
         
         # Telegram Post
         requests.post(f"[https://api.telegram.org/bot](https://api.telegram.org/bot){TG_TOKEN}/sendVideo", 
                       data={"chat_id": TG_CHAT_ID, "video": catbox_url, "caption": caption, "parse_mode": "Markdown"})
         
-        # Webhook for Make.com (Using 'url' key for mapping)
+        # Webhook for Make.com (Mapping fix)
         if WEBHOOK_URL:
             requests.post(WEBHOOK_URL, json={"url": catbox_url, "title": title, "caption": caption}, timeout=10)
             
