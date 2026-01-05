@@ -1,215 +1,134 @@
-import requests, os, random, json, time
-from moviepy.editor import ImageClip, TextClip, CompositeVideoClip, AudioFileClip
-from concurrent.futures import ThreadPoolExecutor
-import PIL.Image
+import requests, random
+from moviepy.editor import *
+from PIL import Image
+from telegram import Bot
 
-# ---------- PIL FIX ----------
-if not hasattr(PIL.Image, 'ANTIALIAS'):
-    PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
-
-# ================== ENV ==================
-PIXABAY_KEY = os.getenv("PIXABAY_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-FREESOUND_KEY = os.getenv("FREESOUND_API_KEY")
-TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+# ================= CONFIG =================
+PIXABAY_API_KEY = "YOUR_PIXABAY_API_KEY"
+FREESOUND_API_KEY = "YOUR_FREESOUND_API_KEY"
+TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+CHAT_ID = "YOUR_CHAT_ID"
+WEBHOOK_URL = "YOUR_WEBHOOK_URL"
 
 AUTHOR = "Lucas Hart"
 DURATION = 5
-HISTORY_FILE = "quotes_history.txt"
 
-# ================== GEMINI (FORCED) ==================
-def get_ai_content():
-    prompt = f"""
-Generate a UNIQUE motivational short-video content.
+# ================= ENGLISH POST TEXT =================
+TITLES = [
+    "Daily Motivation",
+    "One Thought Can Change Everything",
+    "Start Your Day With Purpose",
+    "Pause And Reflect"
+]
 
-Rules:
-- Quote must be motivational (max 100 chars)
-- Title max 40 chars
-- Caption 1–2 inspiring lines
-- Exactly 8 hashtags
-- Never repeat old quotes
-- Output ONLY JSON
+CAPTIONS = [
+    "Let this message guide your mindset today.",
+    "Consistency creates success. Keep moving forward.",
+    "A small thought today can create a big change tomorrow.",
+    "Stay focused. Stay disciplined. Stay unstoppable."
+]
 
-Format:
-{{
- "title":"",
- "quote":"",
- "caption":"",
- "hashtags":["","","","","","","",""]
-}}
+HASHTAGS = [
+    "#motivation",
+    "#dailyquotes",
+    "#mindset",
+    "#success",
+    "#inspiration",
+    "#selfgrowth",
+    "#positivevibes",
+    "#dailymotivation"
+]
 
-Author: {AUTHOR}
-"""
+# ================= QUOTE FETCH (FREE WEBSITE) =================
+def get_quote():
+    r = requests.get("https://zenquotes.io/api/random", timeout=10).json()
+    quote = r[0]["q"]
+    if len(quote) < 50:
+        return get_quote()
+    return f"{quote}\n\n— {AUTHOR}"
 
-    history = set(open(HISTORY_FILE).read().splitlines()) if os.path.exists(HISTORY_FILE) else set()
+# ================= PIXABAY IMAGE =================
+def fetch_image():
+    url = f"https://pixabay.com/api/?key={PIXABAY_API_KEY}&q=nature&orientation=vertical&per_page=50"
+    data = requests.get(url).json()
+    img = random.choice(data["hits"])
+    open("bg.jpg", "wb").write(requests.get(img["largeImageURL"]).content)
 
-    while True:
-        try:
-            res = requests.post(
-                "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent",
-                params={"key": GEMINI_API_KEY},
-                headers={"Content-Type": "application/json"},
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.9, "maxOutputTokens": 300}
-                },
-                timeout=30
-            )
-
-            raw = res.json()["candidates"][0]["content"]["parts"][0]["text"]
-            raw = raw.split("```")[-1].strip()
-            data = json.loads(raw)
-
-            quote = data.get("quote", "").strip()
-            if not quote or quote in history:
-                raise ValueError("Invalid or duplicate quote")
-
-            with open(HISTORY_FILE, "a") as f:
-                f.write(quote + "\n")
-
-            return data
-
-        except Exception as e:
-            print("Retry Gemini:", e)
-            time.sleep(1)
-
-# ================== PIXABAY IMAGE ==================
-def get_image():
-    r = requests.get(
-        "https://pixabay.com/api/",
-        params={
-            "key": PIXABAY_KEY,
-            "q": "nature sunrise mountain",
-            "orientation": "vertical",
-            "image_type": "photo",
-            "safesearch": "true",
-            "per_page": 100
-        },
-        timeout=15
-    )
-    img_url = random.choice(r.json()["hits"])["largeImageURL"]
-    img = requests.get(img_url).content
-
-    with open("bg.jpg", "wb") as f:
-        f.write(img)
-
-    return "bg.jpg"
-
-# ================== FREESOUND MUSIC ==================
-def get_music():
-    headers = {"Authorization": f"Token {FREESOUND_KEY}"}
+# ================= FREESOUND MUSIC =================
+def fetch_music():
+    headers = {"Authorization": f"Token {FREESOUND_API_KEY}"}
+    params = {
+        "query": "soft piano",
+        "filter": "duration:[5 TO 15]",
+        "fields": "previews"
+    }
     r = requests.get(
         "https://freesound.org/apiv2/search/text/",
         headers=headers,
-        params={
-            "query": "soft piano ambient",
-            "filter": "duration:[5 TO 20]",
-            "sort": "rating_desc",
-            "page_size": 20
-        },
-        timeout=20
-    )
-
-    sound = random.choice(r.json()["results"])
-    sid = sound["id"]
-
-    info = requests.get(
-        f"https://freesound.org/apiv2/sounds/{sid}/",
-        headers=headers
+        params=params
     ).json()
+    music_url = random.choice(r["results"])["previews"]["preview-hq-mp3"]
+    open("music.mp3", "wb").write(requests.get(music_url).content)
 
-    audio = requests.get(info["previews"]["preview-hq-mp3"]).content
-    with open("music.mp3", "wb") as f:
-        f.write(audio)
+# ================= VIDEO CREATE =================
+def create_video(text):
+    Image.open("bg.jpg").resize((1080,1920)).save("bg_r.jpg")
+    bg = ImageClip("bg_r.jpg").set_duration(DURATION)
 
-    return "music.mp3"
+    txt = TextClip(
+        text,
+        fontsize=60,
+        color="white",
+        method="caption",
+        size=(900,None),
+        align="center"
+    ).set_position("center").set_duration(DURATION).fadein(0.5)
 
-# ================== VIDEO ==================
-def create_video(quote):
-    bg = get_image()
-    music = get_music()
+    audio = AudioFileClip("music.mp3").subclip(0,DURATION).volumex(0.4)
+    video = CompositeVideoClip([bg, txt]).set_audio(audio)
+    video.write_videofile("final.mp4", fps=30)
 
-    img_clip = (
-        ImageClip(bg)
-        .set_duration(DURATION)
-        .resize(height=1920)
-        .fl_image(lambda i: (i * 0.7).astype("uint8"))
-    )
-
-    txt_clip = (
-        TextClip(
-            f"{quote}\n\n- {AUTHOR}",
-            fontsize=65,
-            color="white",
-            method="caption",
-            size=(850, None)
-        )
-        .set_position("center")
-        .set_duration(DURATION)
-    )
-
-    audio = AudioFileClip(music).volumex(0.4).set_duration(DURATION)
-
-    video = CompositeVideoClip([img_clip, txt_clip]).set_audio(audio)
-    video.write_videofile(
-        "final.mp4",
-        fps=24,
-        codec="libx264",
-        audio_codec="aac"
-    )
-
-    return "final.mp4"
-
-# ================== CATBOX ==================
-def upload_catbox(path):
+# ================= CATBOX UPLOAD =================
+def upload_catbox():
     r = requests.post(
         "https://catbox.moe/user/api.php",
-        data={"reqtype": "fileupload"},
-        files={"fileToUpload": open(path, "rb")}
+        data={"reqtype":"fileupload"},
+        files={"fileToUpload":open("final.mp4","rb")}
     )
     return r.text.strip()
 
-# ================== SEND ==================
-def send_telegram(video, caption):
-    requests.post(
-        f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo",
-        files={"video": open(video, "rb")},
-        data={
-            "chat_id": TG_CHAT_ID,
-            "caption": caption,
-            "parse_mode": "Markdown"
-        }
+# ================= TELEGRAM =================
+def send_telegram(url):
+    bot = Bot(token=TELEGRAM_BOT_TOKEN)
+    msg = (
+        f"{random.choice(TITLES)}\n\n"
+        f"{random.choice(CAPTIONS)}\n\n"
+        f"{url}\n\n"
+        f"{' '.join(HASHTAGS)}"
     )
+    bot.send_message(chat_id=CHAT_ID, text=msg)
 
-def send_webhook(link):
-    requests.post(
-        WEBHOOK_URL,
-        json={"video_url": link},
-        timeout=15
-    )
+# ================= WEBHOOK =================
+def send_webhook(url):
+    payload = {
+        "title": random.choice(TITLES),
+        "caption": random.choice(CAPTIONS),
+        "video": url,
+        "hashtags": HASHTAGS,
+        "language": "en"
+    }
+    requests.post(WEBHOOK_URL, json=payload)
 
-# ================== MAIN ==================
+# ================= MAIN =================
+def main():
+    quote = get_quote()
+    fetch_image()
+    fetch_music()
+    create_video(quote)
+    url = upload_catbox()
+    send_telegram(url)
+    send_webhook(url)
+
 if __name__ == "__main__":
-    print("🤖 Gemini generating...")
-    data = get_ai_content()
-
-    print("🎬 Creating video...")
-    video = create_video(data["quote"])
-
-    print("☁️ Uploading to Catbox...")
-    catbox_link = upload_catbox(video)
-
-    telegram_caption = (
-        f"🎬 *{data['title']}*\n\n"
-        f"{data['caption']}\n\n"
-        f"{' '.join(data['hashtags'])}"
-    )
-
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        ex.submit(send_telegram, video, telegram_caption)
-        ex.submit(send_webhook, catbox_link)
-
-    print("✅ DONE: Telegram video + Webhook link sent")
+    main()
 
