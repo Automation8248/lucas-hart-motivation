@@ -144,12 +144,15 @@ def create_video(quote):
 
     text = (
         TextClip(
-            f"{quote}\n\n- {AUTHOR}",
-            fontsize=65,
-            color="white",
-            method="caption",
-            size=(850, None)
-        )
+    f"{quote}\n\n- {AUTHOR}",
+    fontsize=58,
+    font="arial.ttf",   # ✅ YAHAN PASS KARNA HAI
+    color="white",
+    method="caption",
+    size=(850, None),
+    align="center"
+)
+
         .set_position("center")
         .set_duration(DURATION)
     )
