@@ -1,39 +1,38 @@
 import requests, os, random, json, time
-from moviepy.editor import (
-    ImageClip, TextClip, CompositeVideoClip, AudioFileClip
-)
+from moviepy.editor import ImageClip, TextClip, CompositeVideoClip, AudioFileClip
 from concurrent.futures import ThreadPoolExecutor
 import PIL.Image
 
-# ---------- PIL Fix ----------
+# ---------- PIL FIX ----------
 if not hasattr(PIL.Image, 'ANTIALIAS'):
     PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
 
-# ================== ENV KEYS ==================
+# ================== ENV ==================
 PIXABAY_KEY = os.getenv("PIXABAY_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+FREESOUND_KEY = os.getenv("FREESOUND_API_KEY")
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-FREESOUND_KEY = os.getenv("FREESOUND_API_KEY")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 AUTHOR = "Lucas Hart"
 DURATION = 5
 HISTORY_FILE = "quotes_history.txt"
 
-# ================== GEMINI AI ==================
-def get_ai_content(max_retries=5):
+# ================== GEMINI (FORCED) ==================
+def get_ai_content():
     prompt = f"""
 Generate a UNIQUE motivational short-video content.
 
 Rules:
-- Quote max 100 characters
-- Title max 40 characters
-- Caption 1–2 lines inspiring
+- Quote must be motivational (max 100 chars)
+- Title max 40 chars
+- Caption 1–2 inspiring lines
 - Exactly 8 hashtags
-- Do NOT repeat old quotes
+- Never repeat old quotes
+- Output ONLY JSON
 
-Return ONLY JSON:
+Format:
 {{
  "title":"",
  "quote":"",
@@ -46,41 +45,39 @@ Author: {AUTHOR}
 
     history = set(open(HISTORY_FILE).read().splitlines()) if os.path.exists(HISTORY_FILE) else set()
 
-    for _ in range(max_retries):
+    while True:
         try:
-            r = requests.post(
+            res = requests.post(
                 "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent",
                 params={"key": GEMINI_API_KEY},
                 headers={"Content-Type": "application/json"},
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.8, "maxOutputTokens": 300}
+                    "generationConfig": {"temperature": 0.9, "maxOutputTokens": 300}
                 },
                 timeout=30
             )
 
-            raw = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-            raw = raw.split("```")[-1]
+            raw = res.json()["candidates"][0]["content"]["parts"][0]["text"]
+            raw = raw.split("```")[-1].strip()
             data = json.loads(raw)
 
-            if data["quote"] not in history:
-                with open(HISTORY_FILE, "a") as f:
-                    f.write(data["quote"] + "\n")
-                return data
+            quote = data.get("quote", "").strip()
+            if not quote or quote in history:
+                raise ValueError("Invalid or duplicate quote")
 
-        except Exception:
+            with open(HISTORY_FILE, "a") as f:
+                f.write(quote + "\n")
+
+            return data
+
+        except Exception as e:
+            print("Retry Gemini:", e)
             time.sleep(1)
 
-    return {
-        "title": "Daily Motivation",
-        "quote": "Small progress daily builds unstoppable success.",
-        "caption": "Stay consistent. Stay focused.",
-        "hashtags": ["#motivation","#success","#mindset","#goals","#focus","#growth","#discipline","#shorts"]
-    }
-
 # ================== PIXABAY IMAGE ==================
-def get_real_nature_img():
-    res = requests.get(
+def get_image():
+    r = requests.get(
         "https://pixabay.com/api/",
         params={
             "key": PIXABAY_KEY,
@@ -92,8 +89,8 @@ def get_real_nature_img():
         },
         timeout=15
     )
-    hit = random.choice(res.json()["hits"])
-    img = requests.get(hit["largeImageURL"]).content
+    img_url = random.choice(r.json()["hits"])["largeImageURL"]
+    img = requests.get(img_url).content
 
     with open("bg.jpg", "wb") as f:
         f.write(img)
@@ -101,9 +98,9 @@ def get_real_nature_img():
     return "bg.jpg"
 
 # ================== FREESOUND MUSIC ==================
-def get_soft_piano_music():
+def get_music():
     headers = {"Authorization": f"Token {FREESOUND_KEY}"}
-    res = requests.get(
+    r = requests.get(
         "https://freesound.org/apiv2/search/text/",
         headers=headers,
         params={
@@ -115,7 +112,7 @@ def get_soft_piano_music():
         timeout=20
     )
 
-    sound = random.choice(res.json()["results"])
+    sound = random.choice(r.json()["results"])
     sid = sound["id"]
 
     info = requests.get(
@@ -124,24 +121,24 @@ def get_soft_piano_music():
     ).json()
 
     audio = requests.get(info["previews"]["preview-hq-mp3"]).content
-    with open("bg_music.mp3", "wb") as f:
+    with open("music.mp3", "wb") as f:
         f.write(audio)
 
-    return "bg_music.mp3"
+    return "music.mp3"
 
 # ================== VIDEO ==================
 def create_video(quote):
-    bg = get_real_nature_img()
-    music = get_soft_piano_music()
+    bg = get_image()
+    music = get_music()
 
-    clip = (
+    img_clip = (
         ImageClip(bg)
         .set_duration(DURATION)
         .resize(height=1920)
-        .fl_image(lambda img: (img * 0.7).astype("uint8"))
+        .fl_image(lambda i: (i * 0.7).astype("uint8"))
     )
 
-    txt = (
+    txt_clip = (
         TextClip(
             f"{quote}\n\n- {AUTHOR}",
             fontsize=65,
@@ -155,47 +152,47 @@ def create_video(quote):
 
     audio = AudioFileClip(music).volumex(0.4).set_duration(DURATION)
 
-    video = CompositeVideoClip([clip, txt]).set_audio(audio)
-    video.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
+    video = CompositeVideoClip([img_clip, txt_clip]).set_audio(audio)
+    video.write_videofile(
+        "final.mp4",
+        fps=24,
+        codec="libx264",
+        audio_codec="aac"
+    )
 
-    return "final_short.mp4"
+    return "final.mp4"
 
 # ================== CATBOX ==================
-def upload_catbox(video):
+def upload_catbox(path):
     r = requests.post(
         "https://catbox.moe/user/api.php",
         data={"reqtype": "fileupload"},
-        files={"fileToUpload": open(video, "rb")}
+        files={"fileToUpload": open(path, "rb")}
     )
     return r.text.strip()
 
 # ================== SEND ==================
-def send_telegram(link, caption):
+def send_telegram(video, caption):
     requests.post(
-        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+        f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo",
+        files={"video": open(video, "rb")},
         data={
             "chat_id": TG_CHAT_ID,
-            "text": f"{caption}\n\n🎥 {link}",
+            "caption": caption,
             "parse_mode": "Markdown"
         }
     )
 
-def send_webhook(link, data):
+def send_webhook(link):
     requests.post(
         WEBHOOK_URL,
-        json={
-            "video": link,
-            "title": data["title"],
-            "quote": data["quote"],
-            "caption": data["caption"],
-            "hashtags": data["hashtags"]
-        },
+        json={"video_url": link},
         timeout=15
     )
 
 # ================== MAIN ==================
 if __name__ == "__main__":
-    print("🚀 Generating content...")
+    print("🤖 Gemini generating...")
     data = get_ai_content()
 
     print("🎬 Creating video...")
@@ -204,10 +201,15 @@ if __name__ == "__main__":
     print("☁️ Uploading to Catbox...")
     catbox_link = upload_catbox(video)
 
-    caption = f"🎬 *{data['title']}*\n\n✨ {data['caption']}\n\n{' '.join(data['hashtags'])}"
+    telegram_caption = (
+        f"🎬 *{data['title']}*\n\n"
+        f"{data['caption']}\n\n"
+        f"{' '.join(data['hashtags'])}"
+    )
 
-    with ThreadPoolExecutor(max_workers=2) as exe:
-        exe.submit(send_telegram, catbox_link, caption)
-        exe.submit(send_webhook, catbox_link, data)
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        ex.submit(send_telegram, video, telegram_caption)
+        ex.submit(send_webhook, catbox_link)
 
-    print("✅ Telegram + Webhook sent successfully")
+    print("✅ DONE: Telegram video + Webhook link sent")
+
