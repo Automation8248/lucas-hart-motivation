@@ -17,8 +17,8 @@ AUTHOR = "Lucas Hart"
 DURATION = 5
 HISTORY_FILE = "quotes_history.txt"
 
-# ================== GEMINI AI (FREE) ==================
-def get_ai_content(max_retries=5):
+# ================== GEMINI AI (NO FALLBACK) ==================
+def get_ai_content(max_retries=10):
     prompt = f"""
 Generate a UNIQUE motivational short-video content.
 
@@ -40,38 +40,60 @@ Return ONLY valid JSON:
 Author: {AUTHOR}
 """
 
-    history = set(open(HISTORY_FILE).read().splitlines() if os.path.exists(HISTORY_FILE) else [])
+    history = set()
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r") as f:
+            history = set(f.read().splitlines())
 
-    for _ in range(max_retries):
+    last_error = None
+
+    for attempt in range(1, max_retries + 1):
         try:
+            print(f"🔁 Gemini attempt {attempt}")
+
             res = requests.post(
                 "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent",
                 params={"key": GEMINI_API_KEY},
                 headers={"Content-Type": "application/json"},
-                json={"contents":[{"parts":[{"text":prompt}]}]},
+                json={"contents":[{"parts":[{"text": prompt}]}]},
                 timeout=30
             )
 
+            res.raise_for_status()
+
             raw = res.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+            # Remove markdown if present
             if "```" in raw:
-                raw = raw.split("```")[1]
+                raw = raw.split("```")[1].strip()
 
             data = json.loads(raw)
-            quote = data["quote"].strip()
 
-            if quote and quote not in history:
-                with open(HISTORY_FILE, "a") as f:
-                    f.write(quote + "\n")
-                return data
-        except:
-            time.sleep(1)
+            quote = data.get("quote", "").strip()
 
-    return {
-        "title": "Daily Motivation",
-        "quote": "Small steps daily create massive success.",
-        "caption": "Stay calm. Stay consistent.",
-        "hashtags": ["#motivation","#success","#mindset","#focus","#goals","#growth","#shorts","#daily"]
-    }
+            if not quote:
+                raise ValueError("Empty quote")
+
+            if quote in history:
+                raise ValueError("Repeated quote")
+
+            if len(data.get("hashtags", [])) != 8:
+                raise ValueError("Hashtag count not 8")
+
+            with open(HISTORY_FILE, "a") as f:
+                f.write(quote + "\n")
+
+            print("✅ Gemini content approved")
+            return data
+
+        except Exception as e:
+            last_error = e
+            print(f"⚠️ Gemini error: {e}")
+            time.sleep(1.5)
+
+    raise RuntimeError(
+        f"❌ Gemini failed after {max_retries} attempts | Last error: {last_error}"
+    )
 
 # ================== PIXABAY IMAGE ==================
 def get_real_nature_img():
@@ -86,6 +108,7 @@ def get_real_nature_img():
         },
         timeout=15
     )
+
     hits = res.json()["hits"]
     img_url = random.choice(hits)["largeImageURL"]
     img = requests.get(img_url).content
@@ -95,7 +118,7 @@ def get_real_nature_img():
 
     return "bg.jpg"
 
-# ================== FREESOUND (SOFT PIANO LOGIC) ==================
+# ================== FREESOUND (SOFT PIANO) ==================
 def get_soft_piano_music():
     headers = {"Authorization": f"Token {FREESOUND_KEY}"}
 
@@ -106,13 +129,11 @@ def get_soft_piano_music():
         "cinematic piano soft"
     ]
 
-    query = random.choice(queries)
-
     res = requests.get(
         "https://freesound.org/apiv2/search/text/",
         headers=headers,
         params={
-            "query": query,
+            "query": random.choice(queries),
             "filter": "duration:[10 TO 60]",
             "fields": "previews",
             "page_size": 20
@@ -120,8 +141,7 @@ def get_soft_piano_music():
         timeout=20
     )
 
-    results = res.json()["results"]
-    sound = random.choice(results)
+    sound = random.choice(res.json()["results"])
     preview = sound["previews"]["preview-hq-mp3"]
 
     audio = requests.get(preview).content
@@ -144,15 +164,14 @@ def create_video(quote):
 
     text = (
         TextClip(
-    f"{quote}\n\n- {AUTHOR}",
-    fontsize=58,
-    font="arial.ttf",   # ✅ YAHAN PASS KARNA HAI
-    color="white",
-    method="caption",
-    size=(850, None),
-    align="center"
-)
-
+            f"{quote}\n\n- {AUTHOR}",
+            fontsize=58,
+            font="arial.ttf",
+            color="white",
+            method="caption",
+            size=(850, None),
+            align="center"
+        )
         .set_position("center")
         .set_duration(DURATION)
     )
@@ -180,7 +199,11 @@ if __name__ == "__main__":
     data = get_ai_content()
     video = create_video(data["quote"])
 
-    caption = f"🎬 *{data['title']}*\n\n✨ {data['caption']}\n\n" + " ".join(data["hashtags"])
+    caption = (
+        f"🎬 *{data['title']}*\n\n"
+        f"✨ {data['caption']}\n\n"
+        + " ".join(data["hashtags"])
+    )
 
     requests.post(
         f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo",
@@ -192,5 +215,5 @@ if __name__ == "__main__":
         }
     )
 
-    print("✅ DONE")
+    print("✅ DONE — Gemini only, no fallback")
 
