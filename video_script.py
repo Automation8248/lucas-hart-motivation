@@ -1,5 +1,5 @@
 import requests, os, random, json, time
-from moviepy.editor import ImageClip, TextClip, AudioFileClip, CompositeVideoClip
+from moviepy.editor import ImageClip, TextClip, CompositeVideoClip
 import PIL.Image
 
 # ---------- PIL Fix ----------
@@ -8,113 +8,110 @@ if not hasattr(PIL.Image, 'ANTIALIAS'):
 
 # ================== ENV KEYS ==================
 PIXABAY_KEY = os.getenv('PIXABAY_API_KEY')
-FREESOUND_KEY = os.getenv('FREESOUND_API_KEY')
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')  # Add your Gemini API key
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
 TG_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TG_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
 AUTHOR = "Lucas Hart"
-DURATION = 5  # Video duration in seconds
+DURATION = 5
 HISTORY_FILE = "quotes_history.txt"
 
-# ================== AI DATA (Gemini) ==================
-def get_ai_data(max_retries=5):
-    """
-    Fetches a fresh motivational quote and title from Gemini Generative Language API.
-    Ensures the quote is unique (not used before).
-    """
-    prompt = (
-        f"Generate a unique motivational quote by {AUTHOR} (max 100 chars) "
-        f"and a catchy title (max 40 chars). "
-        f"Return ONLY JSON: {{\"title\":\"...\",\"quote\":\"...\"}}"
-    )
+# ================== AI DATA (OpenRouter FREE) ==================
+def get_ai_content(max_retries=5):
+
+    prompt = f"""
+Generate a UNIQUE motivational short-video content.
+
+Rules:
+- Quote max 100 characters
+- Title max 40 characters
+- Caption should be inspiring (1–2 lines)
+- Exactly 8 hashtags
+- Hashtags must be short & trending
+- Do NOT repeat previous quotes
+
+Return ONLY valid JSON in this format:
+{{
+  "title": "",
+  "quote": "",
+  "caption": "",
+  "hashtags": ["", "", "", "", "", "", "", ""]
+}}
+
+Author name to include: {AUTHOR}
+"""
 
     history = set(open(HISTORY_FILE).read().splitlines() if os.path.exists(HISTORY_FILE) else [])
 
     for attempt in range(max_retries):
         try:
             res = requests.post(
-                "https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generateMessage",
+                "https://openrouter.ai/api/v1/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {GEMINI_API_KEY}",
-                    "Content-Type": "application/json"
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://example.com",
+                    "X-Title": "AI Motivation Shorts"
                 },
                 json={
-                    "prompt": {"text": prompt},
-                    "temperature": 0.7,
-                    "maxOutputTokens": 256
+                    "model": "meta-llama/llama-3-8b-instruct",  # FREE
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.8,
+                    "max_tokens": 300
                 },
-                timeout=25
+                timeout=30
             )
 
-            raw = res.json()["candidates"][0]["content"].strip()
+            raw = res.json()["choices"][0]["message"]["content"].strip()
+
             if "```" in raw:
                 raw = raw.split("```")[1]
 
             data = json.loads(raw)
-            quote = data.get("quote", "").strip()
-            title = data.get("title", "Daily Inspiration").strip()
+            quote = data["quote"].strip()
 
             if quote and quote not in history:
                 with open(HISTORY_FILE, "a") as f:
                     f.write(quote + "\n")
-                return title, quote
+                return data
 
         except Exception as e:
-            print(f"Attempt {attempt+1} AI Error:", e)
+            print(f"AI Attempt {attempt+1} Error:", e)
             time.sleep(1)
 
-    # Fallback if no unique quote
-    fallback_quote = "Discipline today leads to success tomorrow."
-    fallback_title = "Daily Inspiration"
-    print("Using fallback quote.")
-    return fallback_title, fallback_quote
+    # Fallback
+    return {
+        "title": "Daily Motivation",
+        "quote": "Discipline today builds unstoppable success tomorrow.",
+        "caption": "Stay focused. Stay consistent. Results will follow.",
+        "hashtags": ["#motivation", "#success", "#mindset", "#goals", "#discipline", "#focus", "#growth", "#shorts"]
+    }
 
 # ================== PIXABAY IMAGE ==================
 def get_real_nature_img():
     url = "https://pixabay.com/api/"
     params = {
         "key": PIXABAY_KEY,
-        "q": "nature landscape mountain forest river lake waterfall sunset",
+        "q": "nature landscape mountain sunrise",
         "orientation": "vertical",
+        "image_type": "photo",
         "per_page": 100,
-        "safesearch": "true",
-        "image_type": "photo"
+        "safesearch": "true"
     }
 
-    try:
-        res = requests.get(url, params=params, timeout=15)
-        res.raise_for_status()
-        hits = res.json().get("hits", [])
+    res = requests.get(url, params=params, timeout=15)
+    hits = res.json().get("hits", [])
+    random.shuffle(hits)
 
-        if not hits:
-            print("No real photos found.")
-            return None
+    img = requests.get(hits[0]["largeImageURL"]).content
+    with open("bg.jpg", "wb") as f:
+        f.write(img)
 
-        history_file = "image_history.txt"
-        history = open(history_file).read().splitlines() if os.path.exists(history_file) else []
-
-        random.shuffle(hits)
-        for h in hits:
-            if str(h['id']) not in history:
-                img = requests.get(h['largeImageURL'], timeout=15).content
-                with open("bg.jpg", "wb") as f:
-                    f.write(img)
-                with open(history_file, "a") as f:
-                    f.write(str(h['id']) + "\n")
-                return "bg.jpg"
-
-    except Exception as e:
-        print("Pixabay Error:", e)
-
-    return None
+    return "bg.jpg"
 
 # ================== VIDEO ==================
 def create_video(quote):
     bg = get_real_nature_img()
-    if not bg:
-        raise Exception("Image download failed")
 
     clip = (
         ImageClip(bg)
@@ -123,103 +120,48 @@ def create_video(quote):
         .fl_image(lambda img: (img * 0.7).astype("uint8"))
     )
 
-    text = f"{quote}\n\n- {AUTHOR}"
     txt = (
         TextClip(
-            text,
+            f"{quote}\n\n- {AUTHOR}",
             fontsize=65,
             color="white",
-            font="Arial-Bold",
             method="caption",
-            size=(850, None),
+            size=(850, None)
         )
         .set_position("center")
         .set_duration(DURATION)
     )
 
-    audio = None
-    try:
-        search = requests.get(
-            "https://freesound.org/apiv2/search/text/",
-            params={"query": "piano soft", "token": FREESOUND_KEY},
-            timeout=10
-        ).json()
-
-        s_id = search["results"][0]["id"]
-        info = requests.get(
-            f"https://freesound.org/apiv2/sounds/{s_id}/",
-            params={"token": FREESOUND_KEY},
-            timeout=10
-        ).json()
-
-        with open("music.mp3", "wb") as f:
-            f.write(requests.get(info["previews"]["preview-hq-mp3"]).content)
-
-        audio = AudioFileClip("music.mp3").subclip(0, DURATION)
-    except:
-        pass
-
     video = CompositeVideoClip([clip, txt])
-    if audio:
-        video = video.set_audio(audio)
-
-    video.write_videofile(
-        "final_short.mp4",
-        fps=24,
-        codec="libx264",
-        audio_codec="aac"
-    )
+    video.write_videofile("final_short.mp4", fps=24, codec="libx264")
 
     return "final_short.mp4"
 
 # ================== MAIN ==================
 if __name__ == "__main__":
-    try:
-        print("Step 1: Fetch AI motivational quote")
-        title, quote = get_ai_data()
-        print(f"Quote: {quote}")
+    print("Generating AI content...")
+    data = get_ai_content()
 
-        print("Step 2: Generate video")
-        video_file = create_video(quote)
+    title = data["title"]
+    quote = data["quote"]
+    caption_text = data["caption"]
+    hashtags = " ".join(data["hashtags"])
 
-        print("Step 3: Upload to Catbox")
-        with open(video_file, "rb") as f:
-            catbox_url = requests.post(
-                "https://catbox.moe/user/api.php",
-                data={"reqtype": "fileupload"},
-                files={"fileToUpload": f}
-            ).text.strip()
+    print("Creating video...")
+    video_file = create_video(quote)
 
-        if "http" not in catbox_url:
-            raise Exception("Catbox upload failed")
+    caption = f"🎬 *{title}*\n\n✨ {caption_text}\n\n{hashtags}"
 
-        caption = (
-            f"🎬 *{title}*\n\n"
-            f"✨ {quote}\n\n"
-            f"#motivation #nature #shorts #lucashart #success #mindset"
-        )
+    print("Uploading to Telegram...")
+    requests.post(
+        f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo",
+        data={
+            "chat_id": TG_CHAT_ID,
+            "video": open(video_file, "rb"),
+            "caption": caption,
+            "parse_mode": "Markdown"
+        }
+    )
 
-        # ---------- TELEGRAM ----------
-        requests.post(
-            f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo",
-            data={
-                "chat_id": TG_CHAT_ID,
-                "video": catbox_url,
-                "caption": caption,
-                "parse_mode": "Markdown"
-            }
-        )
-
-        # ---------- WEBHOOK ----------
-        if WEBHOOK_URL:
-            requests.post(
-                WEBHOOK_URL,
-                json={"url": catbox_url, "title": title, "caption": caption},
-                timeout=10
-            )
-
-        print("SUCCESS:", catbox_url)
-
-    except Exception as e:
-        print("Fatal Error:", e)
+    print("✅ DONE")
 
