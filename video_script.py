@@ -93,19 +93,36 @@ try:
                                     data={'reqtype': 'fileupload'}, files={'fileToUpload': f}).text.strip()
     
     if "http" in catbox_url:
-        # Title and Caption (Fixed Author Name)
-        title = f"Motivational Quote by {FIXED_AUTHOR}"
-        caption = f"🎬 **{title}**\n\n✨ {quote}\n\n#motivation #lucashart #nature #quotes #shorts"
+        # Title Setup
+        raw_title = f"Motivational Quote by {FIXED_AUTHOR}"
+        
+        # --- Cleaning Content (Removing * and # from text) ---
+        clean_quote = quote.replace('*', '').replace('#', '')
+        clean_title = raw_title.replace('*', '').replace('#', '')
+        
+        # Caption Generation (Isme Text me * ya # nahi hai, sirf hashtags me hai)
+        caption = f"🎬 {clean_title}\n\n✨ {clean_quote}\n\n#motivation #lucashart #nature #quotes #shorts"
         
         print("Step 4: Sending to Telegram & Webhook...")
-        # Telegram Post
-        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo", 
-                      data={"chat_id": TG_CHAT_ID, "video": catbox_url, "caption": caption, "parse_mode": "Markdown"})
         
-        # Webhook for Make.com (URL Mapping Fixed)
+        # Telegram Post (Compulsory)
+        try:
+            requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo", 
+                          data={"chat_id": TG_CHAT_ID, "video": catbox_url, "caption": caption, "parse_mode": "Markdown"})
+            print("Telegram send success.")
+        except Exception as tg_err:
+            print(f"Telegram Failed: {tg_err}")
+
+        # Webhook for Make.com (Compulsory)
         if WEBHOOK_URL:
-            requests.post(WEBHOOK_URL, json={"url": catbox_url, "title": title, "caption": caption}, timeout=10)
-        
+            try:
+                requests.post(WEBHOOK_URL, json={"url": catbox_url, "title": clean_title, "caption": caption}, timeout=10)
+                print("Webhook send success.")
+            except Exception as web_err:
+                print(f"Webhook Failed: {web_err}")
+        else:
+            print("Warning: Webhook URL not found in environment variables.")
+
         print(f"Workflow Complete! Link: {catbox_url}")
     else:
         print("Catbox Upload Failed.")
