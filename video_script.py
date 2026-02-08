@@ -1,7 +1,7 @@
 import requests, os, random, json, time
+import PIL.Image
 
 # PIL Fix for moviepy compatibility
-import PIL.Image
 if not hasattr(PIL.Image, 'ANTIALIAS'):
     PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
 
@@ -23,7 +23,6 @@ def get_free_quote_only():
     try:
         res = requests.get("https://zenquotes.io/api/random", timeout=15)
         data = res.json()[0]
-        # Hum sirf 'q' (quote) le rahe hain, 'a' (author) ko ignore kar rahe hain
         return data['q']
     except Exception as e:
         print(f"Quote Fetch Error: {e}")
@@ -34,28 +33,33 @@ def get_real_nature_img():
     query = "nature+landscape+forest+mountain+-cgi+-animation+-vector"
     url = f"https://pixabay.com/api/?key={PIXABAY_KEY}&q={query}&image_type=photo&orientation=vertical&per_page=50"
     
-    try:
-        response = requests.get(url, timeout=15).json()
-        hits = response.get('hits', [])
-        history_file = "video_history.txt"
-        history = open(history_file, "r").read().splitlines() if os.path.exists(history_file) else []
-        
-        random.shuffle(hits)
-        for hit in hits:
-            if str(hit['id']) not in history:
-                img_data = requests.get(hit['largeImageURL'], timeout=15).content
-                if img_data:
-                    with open('bg.jpg', 'wb') as f: f.write(img_data)
-                    with open(history_file, "a") as f: f.write(str(hit['id']) + "\n")
-                    return 'bg.jpg'
-    except: return None
+    # Retry logic for Pixabay
+    for attempt in range(3):
+        try:
+            response = requests.get(url, timeout=20).json()
+            hits = response.get('hits', [])
+            history_file = "video_history.txt"
+            history = open(history_file, "r").read().splitlines() if os.path.exists(history_file) else []
+            
+            random.shuffle(hits)
+            for hit in hits:
+                if str(hit['id']) not in history:
+                    img_data = requests.get(hit['largeImageURL'], timeout=20).content
+                    if img_data:
+                        with open('bg.jpg', 'wb') as f: f.write(img_data)
+                        with open(history_file, "a") as f: f.write(str(hit['id']) + "\n")
+                        return 'bg.jpg'
+        except Exception as e:
+            print(f"Image attempt {attempt+1} failed: {e}")
+            time.sleep(2)
+    return None
 
 def create_video(quote_text):
     """Video banayega: Quote + Fixed Author (Lucas Hart)"""
     bg_path = get_real_nature_img()
-    if not bg_path: raise Exception("Image download fail ho gayi.")
+    if not bg_path: raise Exception("Image download fail ho gayi sabhi koshishon ke baad.")
 
-    # 1. Background (Darkened for white text visibility)
+    # 1. Background
     bg = ImageClip(bg_path).set_duration(DURATION).resize(height=1920).fl_image(lambda image: (image * 0.6).astype('uint8'))
     
     # 2. Text (Pure White, No Stroke, Fixed Author Lucas Hart)
@@ -67,9 +71,9 @@ def create_video(quote_text):
     # 3. Audio (Piano Music)
     try:
         search = f"https://freesound.org/apiv2/search/text/?query=piano+soft&token={FREESOUND_KEY}"
-        s_id = requests.get(search, timeout=10).json()['results'][0]['id']
-        info = requests.get(f"https://freesound.org/apiv2/sounds/{s_id}/?token={FREESOUND_KEY}", timeout=10).json()
-        with open('music.mp3', 'wb') as f: f.write(requests.get(info['previews']['preview-hq-mp3']).content)
+        s_id = requests.get(search, timeout=15).json()['results'][0]['id']
+        info = requests.get(f"https://freesound.org/apiv2/sounds/{s_id}/?token={FREESOUND_KEY}", timeout=15).json()
+        with open('music.mp3', 'wb') as f: f.write(requests.get(info['previews']['preview-hq-mp3'], timeout=20).content)
         audio = AudioFileClip('music.mp3').subclip(0, DURATION)
     except: audio = None
     
@@ -87,45 +91,50 @@ try:
     print("Step 2: Creating Video...")
     video_file = create_video(quote)
     
-    print("Step 3: Uploading to Catbox...")
-    with open(video_file, 'rb') as f:
-        catbox_url = requests.post("https://catbox.moe/user/api.php", 
-                                    data={'reqtype': 'fileupload'}, files={'fileToUpload': f}).text.strip()
+    print("Step 3: Uploading to Catbox (Fixing Timeout issue)...")
+    catbox_url = ""
+    # Catbox Retry Logic for your Screenshot error
+    for attempt in range(5):
+        try:
+            with open(video_file, 'rb') as f:
+                res = requests.post("https://catbox.moe/user/api.php", 
+                                    data={'reqtype': 'fileupload'}, 
+                                    files={'fileToUpload': f}, 
+                                    timeout=60) # Increased timeout
+                catbox_url = res.text.strip()
+                if "http" in catbox_url: break
+        except Exception as upload_err:
+            print(f"Upload attempt {attempt+1} failed: {upload_err}")
+            time.sleep(5)
     
     if "http" in catbox_url:
-        # Title Setup
         raw_title = f"Motivational Quote by {FIXED_AUTHOR}"
-        
-        # --- Cleaning Content (Removing * and # from text) ---
         clean_quote = quote.replace('*', '').replace('#', '')
         clean_title = raw_title.replace('*', '').replace('#', '')
-        
-        # Caption Generation (Isme Text me * ya # nahi hai, sirf hashtags me hai)
         caption = f"🎬 {clean_title}\n\n✨ {clean_quote}\n\n#motivation #lucashart #nature #quotes #shorts"
         
         print("Step 4: Sending to Telegram & Webhook...")
         
-        # Telegram Post (Compulsory)
+        # Telegram Post
         try:
             requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo", 
-                          data={"chat_id": TG_CHAT_ID, "video": catbox_url, "caption": caption, "parse_mode": "Markdown"})
+                          data={"chat_id": TG_CHAT_ID, "video": catbox_url, "caption": caption, "parse_mode": "Markdown"},
+                          timeout=30)
             print("Telegram send success.")
         except Exception as tg_err:
             print(f"Telegram Failed: {tg_err}")
 
-        # Webhook for Make.com (Compulsory)
+        # Webhook for Make.com
         if WEBHOOK_URL:
             try:
-                requests.post(WEBHOOK_URL, json={"url": catbox_url, "title": clean_title, "caption": caption}, timeout=10)
+                requests.post(WEBHOOK_URL, json={"url": catbox_url, "title": clean_title, "caption": caption}, timeout=20)
                 print("Webhook send success.")
             except Exception as web_err:
                 print(f"Webhook Failed: {web_err}")
-        else:
-            print("Warning: Webhook URL not found in environment variables.")
 
         print(f"Workflow Complete! Link: {catbox_url}")
     else:
-        print("Catbox Upload Failed.")
+        print("Fatal Error: Catbox upload failed after all attempts.")
 
 except Exception as e:
     print(f"Fatal Error: {e}")
