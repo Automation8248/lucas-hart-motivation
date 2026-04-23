@@ -7,16 +7,59 @@ if not hasattr(PIL.Image, 'ANTIALIAS'):
 
 from moviepy.editor import ImageClip, TextClip, AudioFileClip, CompositeVideoClip
 
-# Config & Keys
-PIXABAY_KEY = os.getenv('PIXABAY_API_KEY')
-FREESOUND_KEY = os.getenv('FREESOUND_API_KEY')
+# Config & Keys (Removed Pixabay & Freesound)
 TG_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TG_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
-# Fixed Author Name
+# Fixed Author Name & Settings
 FIXED_AUTHOR = "Lucas Hart"
 DURATION = 5
+COOLING_DAYS = 6
+COOLING_SECONDS = COOLING_DAYS * 24 * 60 * 60
+HISTORY_FILE = "cooling_history.json"
+
+def load_history():
+    """History file load karega jismein files ka last used time save hoga"""
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            pass
+    return {"images": {}, "ringtones": {}}
+
+def save_history(history):
+    """Updated history ko JSON me save karega"""
+    with open(HISTORY_FILE, 'w') as f:
+        json.dump(history, f, indent=4)
+
+def get_file_with_cooling(folder_path, category, history):
+    """Folder se random file select karega jiska 6 din ka cooling period pura ho chuka ho"""
+    if not os.path.exists(folder_path):
+        print(f"Error: '{folder_path}' folder nahi mila.")
+        return None
+    
+    all_files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
+    if not all_files:
+        return None
+
+    current_time = time.time()
+    available_files = []
+
+    for file in all_files:
+        last_used = history[category].get(file, 0)
+        # Agar current time aur last used ke beech ka gap 6 din se zyada hai, tabhi select karo
+        if current_time - last_used >= COOLING_SECONDS:
+            available_files.append(file)
+
+    if available_files:
+        selected_file = random.choice(available_files)
+        # Update history with current timestamp
+        history[category][selected_file] = current_time
+        return os.path.join(folder_path, selected_file)
+    else:
+        return None # Sabhi files currently 6 din ke cooling period mein hain
 
 def get_free_quote_only():
     """ZenQuotes API se sirf motivational quote pick karega"""
@@ -28,36 +71,11 @@ def get_free_quote_only():
         print(f"Quote Fetch Error: {e}")
         return "Your only limit is your mind."
 
-def get_real_nature_img():
-    """Pixabay se Real Nature photo (No CGI/Animation)"""
-    query = "nature+landscape+forest+mountain+-cgi+-animation+-vector"
-    url = f"https://pixabay.com/api/?key={PIXABAY_KEY}&q={query}&image_type=photo&orientation=vertical&per_page=50"
-    
-    # Retry logic for Pixabay
-    for attempt in range(3):
-        try:
-            response = requests.get(url, timeout=20).json()
-            hits = response.get('hits', [])
-            history_file = "video_history.txt"
-            history = open(history_file, "r").read().splitlines() if os.path.exists(history_file) else []
-            
-            random.shuffle(hits)
-            for hit in hits:
-                if str(hit['id']) not in history:
-                    img_data = requests.get(hit['largeImageURL'], timeout=20).content
-                    if img_data:
-                        with open('bg.jpg', 'wb') as f: f.write(img_data)
-                        with open(history_file, "a") as f: f.write(str(hit['id']) + "\n")
-                        return 'bg.jpg'
-        except Exception as e:
-            print(f"Image attempt {attempt+1} failed: {e}")
-            time.sleep(2)
-    return None
-
-def create_video(quote_text):
-    """Video banayega: Quote + Fixed Author (Lucas Hart)"""
-    bg_path = get_real_nature_img()
-    if not bg_path: raise Exception("Image download fail ho gayi sabhi koshishon ke baad.")
+def create_video(quote_text, history):
+    """Video banayega: Quote + Fixed Author (Lucas Hart) with cooling logic"""
+    bg_path = get_file_with_cooling("images", "images", history)
+    if not bg_path: 
+        raise Exception("Images folder khali hai ya folder ki sabhi images 6 din ke cooling period mein hain.")
 
     # 1. Background
     bg = ImageClip(bg_path).set_duration(DURATION).resize(height=1920).fl_image(lambda image: (image * 0.6).astype('uint8'))
@@ -68,23 +86,16 @@ def create_video(quote_text):
     txt = TextClip(full_display_text, fontsize=80, color='white', font='Arial-Bold', 
                    method='caption', size=(850, None), stroke_width=0).set_duration(DURATION).set_position('center')
     
-    # 3. Audio (Local Ringtones Folder)
-    try:
-        ringtone_folder = "ringtones"
-        if os.path.exists(ringtone_folder):
-            audio_files = [f for f in os.listdir(ringtone_folder) if f.endswith(('.mp3', '.wav', '.m4a'))]
-            if audio_files:
-                random_audio = random.choice(audio_files)
-                audio_path = os.path.join(ringtone_folder, random_audio)
-                audio = AudioFileClip(audio_path).subclip(0, DURATION)
-            else:
-                print("Ringtones folder is empty.")
-                audio = None
-        else:
-            print("Ringtones folder not found.")
+    # 3. Audio (Local Ringtones Folder with 6-day cooling check)
+    audio_path = get_file_with_cooling("ringtones", "ringtones", history)
+    if audio_path:
+        try:
+            audio = AudioFileClip(audio_path).subclip(0, DURATION)
+        except Exception as e:
+            print(f"Audio Load Error: {e}")
             audio = None
-    except Exception as e:
-        print(f"Audio Error: {e}")
+    else:
+        print("Warning: Ringtones folder khali hai ya sabhi audio 6 din ke cooling period mein hain. Bina audio ke proceed kar rahe hain.")
         audio = None
     
     final = CompositeVideoClip([bg, txt])
@@ -95,15 +106,21 @@ def create_video(quote_text):
 
 # --- Main Flow ---
 try:
+    # History load karo
+    history = load_history()
+    
     print(f"Step 1: Fetching Quote for {FIXED_AUTHOR}...")
     quote = get_free_quote_only()
     
-    print("Step 2: Creating Video...")
-    video_file = create_video(quote)
+    print("Step 2: Creating Video with 6-Days Cooling Logic...")
+    video_file = create_video(quote, history)
+    
+    # Video successfully banne ke baad history ko save karo taaki next time repeat na ho
+    save_history(history)
     
     print("Step 3: Uploading to Catbox (Fixing Timeout issue)...")
     catbox_url = ""
-    # Catbox Retry Logic for your Screenshot error
+    # Catbox Retry Logic for Screenshot errors
     for attempt in range(5):
         try:
             with open(video_file, 'rb') as f:
@@ -122,7 +139,7 @@ try:
         clean_quote = quote.replace('*', '').replace('#', '')
         clean_title = raw_title.replace('*', '').replace('#', '')
         
-        # Removed hash tags for clean formatting
+        # Clean caption format (no hash tags, no formatting symbols)
         caption = f"🎬 {clean_title}\n\n✨ {clean_quote}\n\nmotivation lucashart nature quotes shorts"
         
         print("Step 4: Sending to Telegram & Webhook...")
