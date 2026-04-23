@@ -7,7 +7,7 @@ if not hasattr(PIL.Image, 'ANTIALIAS'):
 
 from moviepy.editor import ImageClip, TextClip, AudioFileClip, CompositeVideoClip
 
-# Config & Keys (Removed Pixabay & Freesound)
+# Config & Keys
 TG_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TG_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
@@ -19,84 +19,74 @@ COOLING_DAYS = 6
 COOLING_SECONDS = COOLING_DAYS * 24 * 60 * 60
 HISTORY_FILE = "cooling_history.json"
 
+# --- Human Behavior Simulation Logic ---
+# Random user-agents to prevent bot detection and API blocks
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15"
+]
+
+def human_delay():
+    """Anti-bot filter bypass: Insaano jaisa random delay."""
+    time.sleep(random.uniform(2.5, 4.8))
+
+def get_headers():
+    return {"User-Agent": random.choice(USER_AGENTS)}
+# ---------------------------------------
+
 def load_history():
-    """History file load karega jismein files ka last used time save hoga"""
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, 'r') as f:
                 return json.load(f)
-        except:
-            pass
+        except: pass
     return {"images": {}, "ringtones": {}}
 
 def save_history(history):
-    """Updated history ko JSON me save karega"""
     with open(HISTORY_FILE, 'w') as f:
         json.dump(history, f, indent=4)
 
 def get_file_with_cooling(folder_path, category, history):
-    """Folder se random file select karega jiska 6 din ka cooling period pura ho chuka ho"""
-    if not os.path.exists(folder_path):
-        print(f"Error: '{folder_path}' folder nahi mila.")
-        return None
+    if not os.path.exists(folder_path): return None
     
-    all_files = [f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))]
-    if not all_files:
-        return None
+    # Sirf valid extensions hi pick karega (.txt bypass)
+    valid_exts = ('.jpg', '.jpeg', '.png') if category == "images" else ('.mp3', '.wav', '.m4a')
+    all_files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
+    
+    if not all_files: return None
 
     current_time = time.time()
-    available_files = []
-
-    for file in all_files:
-        last_used = history[category].get(file, 0)
-        # Agar current time aur last used ke beech ka gap 6 din se zyada hai, tabhi select karo
-        if current_time - last_used >= COOLING_SECONDS:
-            available_files.append(file)
+    available_files = [f for f in all_files if current_time - history[category].get(f, 0) >= COOLING_SECONDS]
 
     if available_files:
         selected_file = random.choice(available_files)
-        # Update history with current timestamp
         history[category][selected_file] = current_time
         return os.path.join(folder_path, selected_file)
-    else:
-        return None # Sabhi files currently 6 din ke cooling period mein hain
+    return None
 
 def get_free_quote_only():
-    """ZenQuotes API se sirf motivational quote pick karega"""
     try:
-        res = requests.get("https://zenquotes.io/api/random", timeout=15)
-        data = res.json()[0]
-        return data['q']
-    except Exception as e:
-        print(f"Quote Fetch Error: {e}")
-        return "Your only limit is your mind."
+        human_delay()
+        res = requests.get("https://zenquotes.io/api/random", headers=get_headers(), timeout=15)
+        return res.json()[0]['q']
+    except: return "Your only limit is your mind."
 
 def create_video(quote_text, history):
-    """Video banayega: Quote + Fixed Author (Lucas Hart) with cooling logic"""
     bg_path = get_file_with_cooling("images", "images", history)
-    if not bg_path: 
-        raise Exception("Images folder khali hai ya folder ki sabhi images 6 din ke cooling period mein hain.")
+    if not bg_path: raise Exception("Images folder empty hai ya saari images 6 din ki cooling me hain.")
 
-    # 1. Background
     bg = ImageClip(bg_path).set_duration(DURATION).resize(height=1920).fl_image(lambda image: (image * 0.6).astype('uint8'))
-    
-    # 2. Text (Pure White, No Stroke, Fixed Author Lucas Hart)
     full_display_text = f"\"{quote_text}\"\n\n- {FIXED_AUTHOR}"
-    
     txt = TextClip(full_display_text, fontsize=80, color='white', font='Arial-Bold', 
-                   method='caption', size=(850, None), stroke_width=0).set_duration(DURATION).set_position('center')
+                   method='caption', size=(850, None)).set_duration(DURATION).set_position('center')
     
-    # 3. Audio (Local Ringtones Folder with 6-day cooling check)
     audio_path = get_file_with_cooling("ringtones", "ringtones", history)
+    audio = None
     if audio_path:
-        try:
-            audio = AudioFileClip(audio_path).subclip(0, DURATION)
-        except Exception as e:
-            print(f"Audio Load Error: {e}")
-            audio = None
-    else:
-        print("Warning: Ringtones folder khali hai ya sabhi audio 6 din ke cooling period mein hain. Bina audio ke proceed kar rahe hain.")
-        audio = None
+        try: audio = AudioFileClip(audio_path).subclip(0, DURATION)
+        except Exception as e: print(f"Audio Load Error: {e}")
     
     final = CompositeVideoClip([bg, txt])
     if audio: final = final.set_audio(audio)
@@ -104,66 +94,82 @@ def create_video(quote_text, history):
     final.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
     return "final_short.mp4"
 
+def upload_video_with_fallbacks(video_path):
+    """3-Tier Upload System: Catbox -> Litterbox -> File.io"""
+    headers = get_headers()
+    
+    # Method 1: Catbox
+    print("Uploading: Trying Catbox...")
+    for attempt in range(2):
+        human_delay()
+        try:
+            with open(video_path, 'rb') as f:
+                r = requests.post("https://catbox.moe/user/api.php", data={'reqtype': 'fileupload'}, files={'fileToUpload': f}, headers=headers, timeout=60)
+                if "http" in r.text: return r.text.strip()
+        except: pass
+
+    # Method 2: Litterbox (Temporary Catbox Alternative)
+    print("Catbox failed. Trying Litterbox (Litbox)...")
+    human_delay()
+    try:
+        with open(video_path, 'rb') as f:
+            r = requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={'reqtype': 'fileupload', 'time': '72h'}, files={'fileToUpload': f}, headers=headers, timeout=60)
+            if "http" in r.text: return r.text.strip()
+    except: pass
+
+    # Method 3: File.io
+    print("Litterbox failed. Trying File.io...")
+    human_delay()
+    try:
+        with open(video_path, 'rb') as f:
+            r = requests.post("https://file.io", files={'file': f}, headers=headers, timeout=60)
+            data = r.json()
+            if data.get("success"): return data.get("link")
+    except: pass
+    
+    return None
+
 # --- Main Flow ---
 try:
-    # History load karo
     history = load_history()
     
-    print(f"Step 1: Fetching Quote for {FIXED_AUTHOR}...")
+    print("Step 1: Fetching Quote...")
     quote = get_free_quote_only()
     
-    print("Step 2: Creating Video with 6-Days Cooling Logic...")
+    print("Step 2: Creating Video with 6-Days Cooling & Human Logic...")
     video_file = create_video(quote, history)
     
-    # Video successfully banne ke baad history ko save karo taaki next time repeat na ho
+    # Save history immediately after video is made
     save_history(history)
     
-    print("Step 3: Uploading to Catbox (Fixing Timeout issue)...")
-    catbox_url = ""
-    # Catbox Retry Logic for Screenshot errors
-    for attempt in range(5):
-        try:
-            with open(video_file, 'rb') as f:
-                res = requests.post("https://catbox.moe/user/api.php", 
-                                    data={'reqtype': 'fileupload'}, 
-                                    files={'fileToUpload': f}, 
-                                    timeout=60) # Increased timeout
-                catbox_url = res.text.strip()
-                if "http" in catbox_url: break
-        except Exception as upload_err:
-            print(f"Upload attempt {attempt+1} failed: {upload_err}")
-            time.sleep(5)
-    
-    if "http" in catbox_url:
-        raw_title = f"Motivational Quote by {FIXED_AUTHOR}"
+    print("Step 3: Multi-Server Upload Process...")
+    final_url = upload_video_with_fallbacks(video_file)
+
+    if final_url:
+        # Strictly Clean Formatting (No Asterisks, No Hashtags)
         clean_quote = quote.replace('*', '').replace('#', '')
-        clean_title = raw_title.replace('*', '').replace('#', '')
-        
-        # Clean caption format (no hash tags, no formatting symbols)
-        caption = f"🎬 {clean_title}\n\n✨ {clean_quote}\n\nmotivation lucashart nature quotes shorts"
+        caption = f"🎬 Motivational Quote by {FIXED_AUTHOR}\n\n✨ {clean_quote}\n\nmotivation lucashart nature quotes shorts"
         
         print("Step 4: Sending to Telegram & Webhook...")
+        human_delay()
         
         # Telegram Post
         try:
             requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo", 
-                          data={"chat_id": TG_CHAT_ID, "video": catbox_url, "caption": caption, "parse_mode": "Markdown"},
-                          timeout=30)
+                          data={"chat_id": TG_CHAT_ID, "video": final_url, "caption": caption})
             print("Telegram send success.")
-        except Exception as tg_err:
-            print(f"Telegram Failed: {tg_err}")
-
-        # Webhook for Make.com
+        except Exception as tg_err: print(f"Telegram Failed: {tg_err}")
+        
+        # Webhook
         if WEBHOOK_URL:
             try:
-                requests.post(WEBHOOK_URL, json={"url": catbox_url, "title": clean_title, "caption": caption}, timeout=20)
+                requests.post(WEBHOOK_URL, json={"url": final_url, "caption": caption})
                 print("Webhook send success.")
-            except Exception as web_err:
-                print(f"Webhook Failed: {web_err}")
-
-        print(f"Workflow Complete! Link: {catbox_url}")
+            except Exception as web_err: print(f"Webhook Failed: {web_err}")
+            
+        print(f"Workflow Complete! Link: {final_url}")
     else:
-        print("Fatal Error: Catbox upload failed after all attempts.")
+        print("Fatal Error: All 3 upload servers (Catbox, Litbox, File.io) failed.")
 
 except Exception as e:
     print(f"Fatal Error: {e}")
