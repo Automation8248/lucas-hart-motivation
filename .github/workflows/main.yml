@@ -1,45 +1,60 @@
-name: Auto Generate Motivation Video
+name: Daily Motivation Video
 
 on:
-  workflow_dispatch: 
   schedule:
-    - cron: '0 */12 * * *'
+    - cron: '0 14 * * *'  # 9 AM EST (Morning USA)
+    - cron: '0 23 * * *'  # 6 PM EST (Evening USA)
+  workflow_dispatch:      # Manual testing ke liye button
 
 permissions:
-  contents: write 
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 
+          fetch-depth: 0
+
+      - name: Install System Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg imagemagick ghostscript fonts-liberation
+          # ImageMagick policy fix taaki text render ho sake
+          sudo sed -i 's/domain="path" rights="none" pattern="@\*"/domain="path" rights="read|write" pattern="@\*"/g' /etc/ImageMagick-6/policy.xml || true
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install Dependencies
+      - name: Install Python Deps
         run: |
           python -m pip install --upgrade pip
-          pip install requests "moviepy==1.0.3" pillow
+          pip install requests pillow
+          pip install moviepy==1.0.3  # Specific version for better stability
 
       - name: Run Automation Script
         env:
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: |
           python video_script.py
 
-      - name: Save and Push Video History
+      - name: Save Video History
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Agar file exist nahi karti toh error na aaye isliye touch use kiya hai
+          touch cooling_history.json
           git add cooling_history.json
-          git diff --staged --quiet || git commit -m "Update cooling history [skip ci]"
+          
+          git diff --staged --quiet || git commit -m "Update video history log [skip ci]" || echo "No changes to commit"
           git push
