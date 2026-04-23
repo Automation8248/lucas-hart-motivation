@@ -1,57 +1,54 @@
-name: Daily Motivation Video
+name: Auto Generate Motivation Video
 
 on:
+  # Manual button se run karne ke liye
+  workflow_dispatch: 
+  
+  # Automation timer (Har 12 ghante me ek baar chalega. Aap ise change kar sakte hain)
   schedule:
-    # New York: 5:45 PM (17:45)
-    # UTC: 10:45 PM (22:45)
-    # India (IST): 4:15 AM (Agle din)
-    - cron: '45 22 * * *'
-  workflow_dispatch:      # Manual testing ke liye button
+    - cron: '0 */12 * * *'
 
-# Permission fix: Isse workflow ko files (history) push karne ki power milti hai
 permissions:
-  contents: write
+  contents: write # Ye permission bohot zaroori hai history file push karne ke liye
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
 
-      - name: Install System Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg imagemagick
-          # ImageMagick policy fix taaki text render ho sake
-          sudo sed -i 's/domain="path" rights="none" pattern="@\*"/domain="path" rights="read|write" pattern="@\*"/g' /etc/ImageMagick-6/policy.xml
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Pura history fetch karega taaki push error na aaye
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install Python Deps
+      - name: Install Dependencies
         run: |
-          pip install requests 
-          pip install moviepy==1.0.3  # Specific version for better stability
+          python -m pip install --upgrade pip
+          pip install requests moviepy pillow
 
       - name: Run Automation Script
         env:
-          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
-          FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-        run: python video_script.py
-
-      - name: Save Video History
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          # Agar file exist nahi karti toh error na aaye isliye touch use kiya hai
-          touch video_history.txt
-          git add video_history.txt
-          git commit -m "Update video history log" || echo "No changes to commit"
+          python video_script.py
+
+      - name: Save and Push Video History
+        run: |
+          # GitHub bot ko configure karein
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Nayi history file ko add karein
+          git add cooling_history.json
+          
+          # Agar history me koi change hua hai, toh usko commit aur push karein
+          # '[skip ci]' likhne se actions loop me nahi fasega
+          git diff --staged --quiet || git commit -m "Update cooling history [skip ci]"
           git push
