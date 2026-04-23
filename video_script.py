@@ -68,14 +68,24 @@ def create_video(quote_text):
     txt = TextClip(full_display_text, fontsize=80, color='white', font='Arial-Bold', 
                    method='caption', size=(850, None), stroke_width=0).set_duration(DURATION).set_position('center')
     
-    # 3. Audio (Piano Music)
+    # 3. Audio (Local Ringtones Folder)
     try:
-        search = f"https://freesound.org/apiv2/search/text/?query=piano+soft&token={FREESOUND_KEY}"
-        s_id = requests.get(search, timeout=15).json()['results'][0]['id']
-        info = requests.get(f"https://freesound.org/apiv2/sounds/{s_id}/?token={FREESOUND_KEY}", timeout=15).json()
-        with open('music.mp3', 'wb') as f: f.write(requests.get(info['previews']['preview-hq-mp3'], timeout=20).content)
-        audio = AudioFileClip('music.mp3').subclip(0, DURATION)
-    except: audio = None
+        ringtone_folder = "ringtones"
+        if os.path.exists(ringtone_folder):
+            audio_files = [f for f in os.listdir(ringtone_folder) if f.endswith(('.mp3', '.wav', '.m4a'))]
+            if audio_files:
+                random_audio = random.choice(audio_files)
+                audio_path = os.path.join(ringtone_folder, random_audio)
+                audio = AudioFileClip(audio_path).subclip(0, DURATION)
+            else:
+                print("Ringtones folder is empty.")
+                audio = None
+        else:
+            print("Ringtones folder not found.")
+            audio = None
+    except Exception as e:
+        print(f"Audio Error: {e}")
+        audio = None
     
     final = CompositeVideoClip([bg, txt])
     if audio: final = final.set_audio(audio)
@@ -111,7 +121,9 @@ try:
         raw_title = f"Motivational Quote by {FIXED_AUTHOR}"
         clean_quote = quote.replace('*', '').replace('#', '')
         clean_title = raw_title.replace('*', '').replace('#', '')
-        caption = f"🎬 {clean_title}\n\n✨ {clean_quote}\n\n#motivation #lucashart #nature #quotes #shorts"
+        
+        # Removed hash tags for clean formatting
+        caption = f"🎬 {clean_title}\n\n✨ {clean_quote}\n\nmotivation lucashart nature quotes shorts"
         
         print("Step 4: Sending to Telegram & Webhook...")
         
