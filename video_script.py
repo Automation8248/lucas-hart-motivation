@@ -1,4 +1,4 @@
-import requests, os, random, json, time
+import requests, os, random, json, time, re
 import PIL.Image
 
 # PIL Fix for moviepy compatibility
@@ -7,7 +7,7 @@ if not hasattr(PIL.Image, 'ANTIALIAS'):
 
 from moviepy.editor import ImageClip, TextClip, AudioFileClip, CompositeVideoClip
 
-# Config & Keys (Pixabay & Freesound APIs are removed as requested)
+# Config & Keys
 TG_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TG_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
@@ -94,32 +94,116 @@ def create_video(quote_text, history):
 
 def upload_video_with_fallbacks(video_path):
     headers = get_headers()
+    filename = os.path.basename(video_path)
     
-    print("Uploading: Trying Catbox...")
+    print("🚀 Starting 10-Server Upload Fallback Process...")
+
+    # 1. Catbox.moe
+    print("1. Trying Catbox...")
     for attempt in range(2):
         human_delay()
         try:
             with open(video_path, 'rb') as f:
                 r = requests.post("https://catbox.moe/user/api.php", data={'reqtype': 'fileupload'}, files={'fileToUpload': f}, headers=headers, timeout=60)
-                if "http" in r.text: return r.text.strip()
-        except: pass
+                if r.status_code == 200 and r.text.strip().startswith("http"): 
+                    return r.text.strip()
+        except Exception as e: print(f"Catbox failed: {e}")
 
-    print("Catbox failed. Trying Litterbox (Litbox)...")
+    # 2. Litterbox (Litbox)
+    print("2. Trying Litterbox...")
     human_delay()
     try:
         with open(video_path, 'rb') as f:
             r = requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={'reqtype': 'fileupload', 'time': '72h'}, files={'fileToUpload': f}, headers=headers, timeout=60)
-            if "http" in r.text: return r.text.strip()
-    except: pass
+            if r.status_code == 200 and r.text.strip().startswith("http"): 
+                return r.text.strip()
+    except Exception as e: print(f"Litterbox failed: {e}")
 
-    print("Litterbox failed. Trying File.io...")
+    # 3. 0x0.st
+    print("3. Trying 0x0.st...")
+    human_delay()
+    try:
+        with open(video_path, 'rb') as f:
+            r = requests.post("https://0x0.st", files={'file': f}, headers=headers, timeout=60)
+            if r.status_code == 200 and r.text.strip().startswith("http"):
+                return r.text.strip()
+    except Exception as e: print(f"0x0.st failed: {e}")
+
+    # 4. Transfer.sh
+    print("4. Trying Transfer.sh...")
+    human_delay()
+    try:
+        with open(video_path, 'rb') as f:
+            r = requests.put(f"https://transfer.sh/{filename}", data=f, headers=headers, timeout=60)
+            if r.status_code == 200 and r.text.strip().startswith("http"):
+                return r.text.strip()
+    except Exception as e: print(f"Transfer.sh failed: {e}")
+
+    # 5. Uguu.se
+    print("5. Trying Uguu.se...")
+    human_delay()
+    try:
+        with open(video_path, 'rb') as f:
+            r = requests.post("https://uguu.se/upload.php", files={'files[]': f}, headers=headers, timeout=60)
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("success"): return data["files"][0]["url"]
+    except Exception as e: print(f"Uguu.se failed: {e}")
+
+    # 6. Tmpfiles.org
+    print("6. Trying Tmpfiles.org...")
+    human_delay()
+    try:
+        with open(video_path, 'rb') as f:
+            r = requests.post("https://tmpfiles.org/api/v1/upload", files={'file': f}, headers=headers, timeout=60)
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("status") == "success":
+                    return data["data"]["url"].replace("tmpfiles.org/", "tmpfiles.org/dl/")
+    except Exception as e: print(f"Tmpfiles.org failed: {e}")
+
+    # 7. Pomf.lain.la
+    print("7. Trying Pomf.lain.la...")
+    human_delay()
+    try:
+        with open(video_path, 'rb') as f:
+            r = requests.post("https://pomf.lain.la/upload.php", files={'files[]': f}, headers=headers, timeout=60)
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("success"): return data["files"][0]["url"]
+    except Exception as e: print(f"Pomf.lain.la failed: {e}")
+
+    # 8. temp.sh
+    print("8. Trying Temp.sh...")
+    human_delay()
+    try:
+        with open(video_path, 'rb') as f:
+            r = requests.put(f"https://temp.sh/{filename}", data=f, headers=headers, timeout=60)
+            if r.status_code == 200 and r.text.strip().startswith("http"):
+                return r.text.strip()
+    except Exception as e: print(f"Temp.sh failed: {e}")
+
+    # 9. Bashupload.com
+    print("9. Trying Bashupload...")
+    human_delay()
+    try:
+        with open(video_path, 'rb') as f:
+            r = requests.put(f"https://bashupload.com/{filename}", data=f, headers=headers, timeout=60)
+            if r.status_code == 200:
+                match = re.search(r'(https?://bashupload\.com/\S+)', r.text)
+                if match: return match.group(1)
+    except Exception as e: print(f"Bashupload failed: {e}")
+
+    # 10. File.io (Last Resort)
+    print("10. Trying File.io...")
     human_delay()
     try:
         with open(video_path, 'rb') as f:
             r = requests.post("https://file.io", files={'file': f}, headers=headers, timeout=60)
-            data = r.json()
-            if data.get("success"): return data.get("link")
-    except: pass
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("success"): return data.get("link")
+    except Exception as e: print(f"File.io failed: {e}")
     
     return None
 
@@ -140,7 +224,6 @@ try:
     final_url = upload_video_with_fallbacks(video_file)
 
     if final_url:
-        # Hashtags strictly wapas add kar diye gaye hain
         raw_title = f"Motivational Quote by {FIXED_AUTHOR}"
         clean_quote = quote.replace('*', '') 
         clean_title = raw_title.replace('*', '')
@@ -160,14 +243,13 @@ try:
         # Webhook for Make.com
         if WEBHOOK_URL:
             try:
-                # "title" key bhi wapas add kar di gayi hai aapke webhook trigger ke liye
                 requests.post(WEBHOOK_URL, json={"url": final_url, "title": clean_title, "caption": caption}, timeout=20)
                 print("Webhook send success.")
             except Exception as web_err: print(f"Webhook Failed: {web_err}")
             
         print(f"Workflow Complete! Link: {final_url}")
     else:
-        print("Fatal Error: All 3 upload servers (Catbox, Litbox, File.io) failed.")
+        print("Fatal Error: All 10 upload servers failed.")
 
 except Exception as e:
     print(f"Fatal Error: {e}")
