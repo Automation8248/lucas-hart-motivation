@@ -19,19 +19,8 @@ COOLING_DAYS = 6
 COOLING_SECONDS = COOLING_DAYS * 24 * 60 * 60
 HISTORY_FILE = "cooling_history.json"
 
-# --- Human Behavior Simulation Logic ---
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15"
-]
-
-def human_delay():
-    time.sleep(random.uniform(2.5, 4.8))
-
-def get_headers():
-    return {"User-Agent": random.choice(USER_AGENTS)}
+# Basic Headers (Removed heavy randomizer, kept it simple to avoid blocks)
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
 
 # --- History & Cooling Logic ---
 def load_history():
@@ -48,10 +37,8 @@ def save_history(history):
 
 def get_file_with_cooling(folder_path, category, history):
     if not os.path.exists(folder_path): return None
-    
     valid_exts = ('.jpg', '.jpeg', '.png') if category == "images" else ('.mp3', '.wav', '.m4a')
     all_files = [f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)]
-    
     if not all_files: return None
 
     current_time = time.time()
@@ -66,8 +53,7 @@ def get_file_with_cooling(folder_path, category, history):
 # --- API & Video Logic ---
 def get_free_quote_only():
     try:
-        human_delay()
-        res = requests.get("https://zenquotes.io/api/random", headers=get_headers(), timeout=15)
+        res = requests.get("https://zenquotes.io/api/random", headers=HEADERS, timeout=10)
         return res.json()[0]['q']
     except: return "Your only limit is your mind."
 
@@ -92,160 +78,74 @@ def create_video(quote_text, history):
     final.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
     return "final_short.mp4"
 
+# --- FAST UPLOAD LOGIC WITH 10 SERVERS (Zero Delays) ---
 def upload_video_with_fallbacks(video_path):
-    headers = get_headers()
     filename = os.path.basename(video_path)
-    
-    print("🚀 Starting 10-Server Upload Fallback Process...")
+    print("🚀 Starting Fast 10-Server Upload...")
 
-    # 1. Catbox.moe
-    print("1. Trying Catbox...")
-    for attempt in range(2):
-        human_delay()
+    servers = [
+        ("Catbox", lambda: requests.post("https://catbox.moe/user/api.php", data={'reqtype': 'fileupload'}, files={'fileToUpload': open(video_path, 'rb')}, headers=HEADERS, timeout=30)),
+        ("Litterbox", lambda: requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={'reqtype': 'fileupload', 'time': '72h'}, files={'fileToUpload': open(video_path, 'rb')}, headers=HEADERS, timeout=30)),
+        ("0x0.st", lambda: requests.post("https://0x0.st", files={'file': open(video_path, 'rb')}, headers=HEADERS, timeout=30)),
+        ("Transfer.sh", lambda: requests.put(f"https://transfer.sh/{filename}", data=open(video_path, 'rb'), headers=HEADERS, timeout=30)),
+        ("Uguu.se", lambda: requests.post("https://uguu.se/upload.php", files={'files[]': open(video_path, 'rb')}, headers=HEADERS, timeout=30)),
+        ("Tmpfiles.org", lambda: requests.post("https://tmpfiles.org/api/v1/upload", files={'file': open(video_path, 'rb')}, headers=HEADERS, timeout=30)),
+        ("Pomf.lain.la", lambda: requests.post("https://pomf.lain.la/upload.php", files={'files[]': open(video_path, 'rb')}, headers=HEADERS, timeout=30)),
+        ("Temp.sh", lambda: requests.put(f"https://temp.sh/{filename}", data=open(video_path, 'rb'), headers=HEADERS, timeout=30)),
+        ("Bashupload", lambda: requests.put(f"https://bashupload.com/{filename}", data=open(video_path, 'rb'), headers=HEADERS, timeout=30)),
+        ("File.io", lambda: requests.post("https://file.io", files={'file': open(video_path, 'rb')}, headers=HEADERS, timeout=30))
+    ]
+
+    for name, req_func in servers:
+        print(f"Trying {name}...")
         try:
-            with open(video_path, 'rb') as f:
-                r = requests.post("https://catbox.moe/user/api.php", data={'reqtype': 'fileupload'}, files={'fileToUpload': f}, headers=headers, timeout=60)
-                if r.status_code == 200 and r.text.strip().startswith("http"): 
-                    return r.text.strip()
-        except Exception as e: print(f"Catbox failed: {e}")
-
-    # 2. Litterbox (Litbox)
-    print("2. Trying Litterbox...")
-    human_delay()
-    try:
-        with open(video_path, 'rb') as f:
-            r = requests.post("https://litterbox.catbox.moe/resources/internals/api.php", data={'reqtype': 'fileupload', 'time': '72h'}, files={'fileToUpload': f}, headers=headers, timeout=60)
-            if r.status_code == 200 and r.text.strip().startswith("http"): 
-                return r.text.strip()
-    except Exception as e: print(f"Litterbox failed: {e}")
-
-    # 3. 0x0.st
-    print("3. Trying 0x0.st...")
-    human_delay()
-    try:
-        with open(video_path, 'rb') as f:
-            r = requests.post("https://0x0.st", files={'file': f}, headers=headers, timeout=60)
-            if r.status_code == 200 and r.text.strip().startswith("http"):
-                return r.text.strip()
-    except Exception as e: print(f"0x0.st failed: {e}")
-
-    # 4. Transfer.sh
-    print("4. Trying Transfer.sh...")
-    human_delay()
-    try:
-        with open(video_path, 'rb') as f:
-            r = requests.put(f"https://transfer.sh/{filename}", data=f, headers=headers, timeout=60)
-            if r.status_code == 200 and r.text.strip().startswith("http"):
-                return r.text.strip()
-    except Exception as e: print(f"Transfer.sh failed: {e}")
-
-    # 5. Uguu.se
-    print("5. Trying Uguu.se...")
-    human_delay()
-    try:
-        with open(video_path, 'rb') as f:
-            r = requests.post("https://uguu.se/upload.php", files={'files[]': f}, headers=headers, timeout=60)
+            r = req_func()
             if r.status_code == 200:
-                data = r.json()
-                if data.get("success"): return data["files"][0]["url"]
-    except Exception as e: print(f"Uguu.se failed: {e}")
-
-    # 6. Tmpfiles.org
-    print("6. Trying Tmpfiles.org...")
-    human_delay()
-    try:
-        with open(video_path, 'rb') as f:
-            r = requests.post("https://tmpfiles.org/api/v1/upload", files={'file': f}, headers=headers, timeout=60)
-            if r.status_code == 200:
-                data = r.json()
-                if data.get("status") == "success":
-                    return data["data"]["url"].replace("tmpfiles.org/", "tmpfiles.org/dl/")
-    except Exception as e: print(f"Tmpfiles.org failed: {e}")
-
-    # 7. Pomf.lain.la
-    print("7. Trying Pomf.lain.la...")
-    human_delay()
-    try:
-        with open(video_path, 'rb') as f:
-            r = requests.post("https://pomf.lain.la/upload.php", files={'files[]': f}, headers=headers, timeout=60)
-            if r.status_code == 200:
-                data = r.json()
-                if data.get("success"): return data["files"][0]["url"]
-    except Exception as e: print(f"Pomf.lain.la failed: {e}")
-
-    # 8. temp.sh
-    print("8. Trying Temp.sh...")
-    human_delay()
-    try:
-        with open(video_path, 'rb') as f:
-            r = requests.put(f"https://temp.sh/{filename}", data=f, headers=headers, timeout=60)
-            if r.status_code == 200 and r.text.strip().startswith("http"):
-                return r.text.strip()
-    except Exception as e: print(f"Temp.sh failed: {e}")
-
-    # 9. Bashupload.com
-    print("9. Trying Bashupload...")
-    human_delay()
-    try:
-        with open(video_path, 'rb') as f:
-            r = requests.put(f"https://bashupload.com/{filename}", data=f, headers=headers, timeout=60)
-            if r.status_code == 200:
-                match = re.search(r'(https?://bashupload\.com/\S+)', r.text)
-                if match: return match.group(1)
-    except Exception as e: print(f"Bashupload failed: {e}")
-
-    # 10. File.io (Last Resort)
-    print("10. Trying File.io...")
-    human_delay()
-    try:
-        with open(video_path, 'rb') as f:
-            r = requests.post("https://file.io", files={'file': f}, headers=headers, timeout=60)
-            if r.status_code == 200:
-                data = r.json()
-                if data.get("success"): return data.get("link")
-    except Exception as e: print(f"File.io failed: {e}")
-    
+                text = r.text.strip()
+                # Parse depending on API response type
+                if name in ["Uguu.se", "Pomf.lain.la"] and r.json().get("success"): return r.json()["files"][0]["url"]
+                elif name == "Tmpfiles.org" and r.json().get("status") == "success": return r.json()["data"]["url"].replace("tmpfiles.org/", "tmpfiles.org/dl/")
+                elif name == "File.io" and r.json().get("success"): return r.json().get("link")
+                elif name == "Bashupload":
+                    match = re.search(r'(https?://bashupload\.com/\S+)', text)
+                    if match: return match.group(1)
+                elif text.startswith("http"): 
+                    return text
+        except Exception as e:
+            print(f"{name} Failed.")
+            continue
+            
     return None
 
 # --- Main Flow ---
 try:
     history = load_history()
-    
     print("Step 1: Fetching Quote...")
     quote = get_free_quote_only()
     
-    print("Step 2: Creating Video with 6-Days Cooling & Human Logic...")
+    print("Step 2: Creating Video...")
     video_file = create_video(quote, history)
-    
-    # Save history
     save_history(history)
     
-    print("Step 3: Multi-Server Upload Process...")
+    print("Step 3: Uploading...")
     final_url = upload_video_with_fallbacks(video_file)
 
     if final_url:
-        raw_title = f"Motivational Quote by {FIXED_AUTHOR}"
+        clean_title = f"Motivational Quote by {FIXED_AUTHOR}".replace('*', '')
         clean_quote = quote.replace('*', '') 
-        clean_title = raw_title.replace('*', '')
-        
         caption = f"🎬 {clean_title}\n\n✨ {clean_quote}\n\n#motivation #lucashart #nature #quotes #shorts"
         
-        print("Step 4: Sending to Telegram & Webhook...")
-        human_delay()
-        
-        # Telegram Post
+        print("Step 4: Sending Webhook/Telegram...")
         try:
-            requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo", 
-                          data={"chat_id": TG_CHAT_ID, "video": final_url, "caption": caption, "parse_mode": "Markdown"})
+            requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo", data={"chat_id": TG_CHAT_ID, "video": final_url, "caption": caption, "parse_mode": "Markdown"})
             print("Telegram send success.")
-        except Exception as tg_err: print(f"Telegram Failed: {tg_err}")
+        except: pass
         
-        # Webhook for Make.com
         if WEBHOOK_URL:
             try:
-                requests.post(WEBHOOK_URL, json={"url": final_url, "title": clean_title, "caption": caption}, timeout=20)
+                requests.post(WEBHOOK_URL, json={"url": final_url, "title": clean_title, "caption": caption}, timeout=10)
                 print("Webhook send success.")
-            except Exception as web_err: print(f"Webhook Failed: {web_err}")
+            except: pass
             
         print(f"Workflow Complete! Link: {final_url}")
     else:
