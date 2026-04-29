@@ -19,7 +19,7 @@ COOLING_DAYS = 6
 COOLING_SECONDS = COOLING_DAYS * 24 * 60 * 60
 HISTORY_FILE = "cooling_history.json"
 
-# Basic Headers (Removed heavy randomizer, kept it simple to avoid blocks)
+# Basic Headers
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"}
 
 # --- History & Cooling Logic ---
