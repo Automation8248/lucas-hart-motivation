@@ -230,7 +230,7 @@ try:
     if final_url:
         clean_title = f"Motivational Quote by {FIXED_AUTHOR}".replace('*', '')
         clean_quote = quote.replace('*', '') 
-        caption = f"🎬 {clean_title}\n\n✨ {clean_quote}\n\n#motivation #lucashart #nature #quotes #shorts"
+        caption = f"🎬 {clean_title}\n\n✨ {clean_quote}\n\n#viral #trending #foryou #viralvideo #explore #mustwatch #watchnow #trendalert #contentcreator #digitalgrowth #audiencegrowth #shorts"
         
         print("Step 4: Sending Webhook/Telegram...")
         try:
